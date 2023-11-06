@@ -1,7 +1,11 @@
+#include "mpi.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <mpi.h>
+#include <time.h>
 #include <adiak.hpp>
+#include <caliper/cali.h>
+#include <caliper/cali-manager.h>
 
 // Add other necessary headers if required
 
@@ -18,11 +22,32 @@ void data_init(int* A, int arr_size) {
     CALI_MARK_END("data_init");
 }
 
-// Function for small sorting
-void smallSort(int A[], int arr_size) {
+// Function for small sorting using quicksort
+void smallSort(int A[], int left, int right) {
     CALI_MARK_BEGIN("comp");
     CALI_MARK_BEGIN("comp_small");
-    // Implement smallSort logic here
+
+    if (left < right) {
+        // Partition the array
+        int pivot = A[right];
+        int i = left - 1;
+        for (int j = left; j <= right - 1; j++) {
+            if (A[j] < pivot) {
+                i++;
+                int temp = A[i];
+                A[i] = A[j];
+                A[j] = temp;
+            }
+        }
+        int temp = A[i + 1];
+        A[i + 1] = A[right];
+        A[right] = temp;
+        int pi = i + 1;
+        // Recursively sort elements before and after partition
+        smallSort(A, left, pi - 1);
+        smallSort(A, pi + 1, right);
+    }
+
     CALI_MARK_END("comp_small");
     CALI_MARK_END("comp");
 }
@@ -31,7 +56,7 @@ void smallSort(int A[], int arr_size) {
 void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) {
     // if average bucket size is below a threshold switch to quicksort
     if (arr_size / k < threshold) {
-        smallSort(A, arr_size);
+        smallSort(A, 0, arr_size - 1); // Sort the entire array
         return;
     }
 
@@ -42,36 +67,104 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
     int* S = (int*)malloc(num_proc * k * sizeof(int));
 
     // Select and sort samples
-    // (implement code for selecting and sorting samples)
+    for (int i = 1; i < num_proc; i++) {
+        int sample_index = i * (arr_size / num_proc); // Calculate the sample index
+        S[i - 1] = A[sample_index]; // Select the sample
+    }
+    smallSort(S, 0, num_proc - 2); // Sort the samples using smallSort
 
     // Select splitters
-    int* splitters = (int*)malloc((num_proc + 1) * sizeof(int));
+    int* splitters = (int*)malloc(num_proc * sizeof(int));
     splitters[0] = -INT_MAX;
-    splitters[num_proc] = INT_MAX;
-
-    // (implement code for selecting splitters)
+    splitters[num_proc - 1] = INT_MAX;
+    for (int i = 1; i < num_proc; i++) {
+        int splitter_index = i * (num_proc - 1); // Calculate the splitter index
+        splitters[i] = S[splitter_index]; // Select the splitter
+    }
 
     CALI_MARK_END("comp_large");
 
-    // Step 2
-    for (int i = 0; i < n; i++) {
+   // Step 2
+    int* bucket_sizes = (int*)malloc(num_proc * sizeof(int)); // Array to store the size of each bucket
+
+    // Initialize bucket sizes to zero
+    for (int i = 0; i < num_proc; i++) {
+        bucket_sizes[i] = 0;
+    }
+
+    // Count how many elements belong to each bucket
+    for (int i = 0; i < arr_size; i++) {
         int j;
-        for (j = 0; j < p; j++) {
+        for (j = 0; j < num_proc; j++) {
             if (splitters[j] < A[i] && A[i] <= splitters[j + 1]) {
+                bucket_sizes[j]++;
                 break;
             }
         }
-        // place A[i] in bucket bj
-        // (implement code to place A[i] in the appropriate bucket)
     }
 
-    free(S);
-    free(splitters);
+    // Calculate the displacement for each bucket
+    int* bucket_displacements = (int*)malloc(num_proc * sizeof(int));
+    bucket_displacements[0] = 0;
+    for (int i = 1; i < num_proc; i++) {
+        bucket_displacements[i] = bucket_displacements[i - 1] + bucket_sizes[i - 1];
+    }
+
+    // Allocate memory for the local bucket
+    int local_bucket_size = bucket_sizes[rank];
+    int* local_bucket = (int*)malloc(local_bucket_size * sizeof(int));
+
+    // Place elements into the local bucket based on the splitters
+    int local_index = 0;
+    for (int i = 0; i < arr_size; i++) {
+        int j;
+        for (j = 0; j < num_proc; j++) {
+            if (splitters[j] < A[i] && A[i] <= splitters[j + 1]) {
+                local_bucket[local_index] = A[i];
+                local_index++;
+                break;
+            }
+        }
+    }
 
     CALI_MARK_END("comp");
 
     // Step 3 and concatenation
-    // (implement code to concatenate sampleSort(b1), ..., sampleSort(bk))
+    void step3_and_concat(int* local_bucket, int* bucket_sizes, int* bucket_displacements, int n, int p, int rank) {
+        // Determine the size of each local bucket
+        int local_bucket_size = bucket_sizes[rank];
+        
+        // Create an array to hold the sizes of all local buckets
+        int* all_bucket_sizes = (int*)malloc(p * sizeof(int));
+        
+        // Use MPI_Allgather to share the local bucket sizes with all processes
+        MPI_Allgather(&local_bucket_size, 1, MPI_INT, all_bucket_sizes, 1, MPI_INT, MPI_COMM_WORLD);
+        
+        // Calculate the total size of all buckets
+        int total_bucket_size = 0;
+        for (int i = 0; i < p; i++) {
+            total_bucket_size += all_bucket_sizes[i];
+        }
+        
+        // Allocate memory for the concatenated array
+        int* concatenated_array = (int*)malloc(total_bucket_size * sizeof(int));
+        
+        // Use MPI_Alltoallv to exchange data between processes
+        MPI_Alltoallv(local_bucket, bucket_sizes, bucket_displacements, MPI_INT,
+                    concatenated_array, all_bucket_sizes, bucket_displacements, MPI_INT, MPI_COMM_WORLD);
+        
+        // Now 'concatenated_array' contains the sorted elements from all buckets
+        // You can use it as needed
+        
+        // Don't forget to free allocated memory when done
+        free(S);
+        free(splitters);
+        free(bucket_sizes);
+        free(bucket_displacements);
+        free(local_bucket);
+        free(all_bucket_sizes);
+        free(concatenated_array);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -107,9 +200,9 @@ int main(int argc, char** argv) {
     adiak::value("Algorithm", "SampleSort"); // The name of the algorithm you are using (e.g., "MergeSort", "BitonicSort")
     adiak::value("ProgrammingModel", "MPI"); // e.g., "MPI", "CUDA", "MPIwithCUDA"
     adiak::value("Datatype", "int"); // The datatype of input elements (e.g., double, int, float)
-    //adiak::value("SizeOfDatatype", sizeOfDatatype); // sizeof(datatype) of input elements in bytes (e.g., 1, 2, 4)
-    //adiak::value("InputSize", inputSize); // The number of elements in input dataset (1000)
-    //adiak::value("InputType", inputType); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
+    adiak::value("SizeOfDatatype", "4"); // sizeof(datatype) of input elements in bytes (e.g., 1, 2, 4)
+    adiak::value("InputSize", "1000"); // The number of elements in input dataset (1000)
+    adiak::value("InputType", "Random"); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
     adiak::value("num_procs", size); // The number of processors (MPI ranks)
     //adiak::value("num_threads", num_threads); // The number of CUDA or OpenMP threads
     //adiak::value("num_blocks", num_blocks); // The number of CUDA blocks 
