@@ -12,20 +12,18 @@
 #define threshold 10 // Adjust this threshold as needed
 
 // Function to initialize data
-void data_init(int* A, int arr_size) {
-    CALI_MARK_BEGIN("data_init");
+void dataInit(int* A, int arr_size) {
     srand(time(NULL));
     int i;
     for (i = 0; i < arr_size; ++i) {
         A[i] = random_float();
     }
-    CALI_MARK_END("data_init");
 }
 
 // Function for small sorting using quicksort
 void smallSort(int A[], int left, int right) {
-    CALI_MARK_BEGIN("comp");
-    CALI_MARK_BEGIN("comp_small");
+    CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_small);
 
     if (left < right) {
         // Partition the array
@@ -48,8 +46,8 @@ void smallSort(int A[], int left, int right) {
         smallSort(A, pi + 1, right);
     }
 
-    CALI_MARK_END("comp_small");
-    CALI_MARK_END("comp");
+    CALI_MARK_END(comp_small);
+    CALI_MARK_END(comp);
 }
 
 // Function for sampleSort
@@ -61,8 +59,8 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
     }
 
     // Step 1
-    CALI_MARK_BEGIN("comp");
-    CALI_MARK_BEGIN("comp_large");
+    CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_large);
 
     int* S = (int*)malloc(num_proc * k * sizeof(int));
 
@@ -82,7 +80,7 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
         splitters[i] = S[splitter_index]; // Select the splitter
     }
 
-    CALI_MARK_END("comp_large");
+    CALI_MARK_END(comp_large);
 
    // Step 2
     int* bucket_sizes = (int*)malloc(num_proc * sizeof(int)); // Array to store the size of each bucket
@@ -127,7 +125,7 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
         }
     }
 
-    CALI_MARK_END("comp");
+    CALI_MARK_END(comp);
 
     // Step 3 and concatenation
     void step3_and_concat(int* local_bucket, int* bucket_sizes, int* bucket_displacements, int n, int p, int rank) {
@@ -168,6 +166,20 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
 }
 
 int main(int argc, char** argv) {
+    CALI_CXX_MARK_FUNCTION;
+
+    const char* comp = "comp";
+    const char* comp_large = "comp_large";
+    const char* comp_small = "comp_small";
+    // const char* comm = "comm";
+    // const char* comm_large = "comm_large";
+    // const char* comm_small = "comm_small";
+    const char* data_init = "data_init";
+    const char* whole_computation = "whole_computation";
+    // const char* correctness_check = "correctness_check";
+    // const char* mpi_barrier = "mpi_barrier";
+
+    CALI_MARK_BEGIN(whole_computation);
     MPI_Init(&argc, &argv);
 
     int rank, size;
@@ -188,7 +200,9 @@ int main(int argc, char** argv) {
 
     int* A = (int*)malloc(arr_size * sizeof(int));
 
-    data_init(A, arr_size);
+    CALI_MARK_BEGIN(data_init);
+    dataInit(A, arr_size);
+    CALI_MARK_END(data_init);
 
     sampleSort(A, arr_size, k, num_proc, rank, size);
 
@@ -212,6 +226,7 @@ int main(int argc, char** argv) {
     free(A);
 
     MPI_Finalize();
+    CALI_MARK_END(whole_computation);
 
     return 0;
 }
