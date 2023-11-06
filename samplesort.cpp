@@ -1,6 +1,7 @@
 #include "mpi.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
 #include <mpi.h>
 #include <time.h>
 #include <adiak.hpp>
@@ -13,17 +14,19 @@
 
 // Function to initialize data
 void dataInit(int* A, int arr_size) {
+    CALI_MARK_BEGIN("data_init");
     srand(time(NULL));
     int i;
     for (i = 0; i < arr_size; ++i) {
-        A[i] = random_float();
+        A[i] = rand();
     }
+    CALI_MARK_END("data_init");
 }
 
 // Function for small sorting using quicksort
 void smallSort(int A[], int left, int right) {
-    CALI_MARK_BEGIN(comp);
-    CALI_MARK_BEGIN(comp_small);
+    CALI_MARK_BEGIN("comp");
+    CALI_MARK_BEGIN("comp_small");
 
     if (left < right) {
         // Partition the array
@@ -46,8 +49,8 @@ void smallSort(int A[], int left, int right) {
         smallSort(A, pi + 1, right);
     }
 
-    CALI_MARK_END(comp_small);
-    CALI_MARK_END(comp);
+    CALI_MARK_END("comp_small");
+    CALI_MARK_END("comp");
 }
 
 // Function for sampleSort
@@ -57,10 +60,10 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
         smallSort(A, 0, arr_size - 1); // Sort the entire array
         return;
     }
-
+printf("3\n");
     // Step 1
-    CALI_MARK_BEGIN(comp);
-    CALI_MARK_BEGIN(comp_large);
+    CALI_MARK_BEGIN("comp");
+    CALI_MARK_BEGIN("comp_large");
 
     int* S = (int*)malloc(num_proc * k * sizeof(int));
 
@@ -70,7 +73,7 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
         S[i - 1] = A[sample_index]; // Select the sample
     }
     smallSort(S, 0, num_proc - 2); // Sort the samples using smallSort
-
+printf("4\n");
     // Select splitters
     int* splitters = (int*)malloc(num_proc * sizeof(int));
     splitters[0] = -INT_MAX;
@@ -80,11 +83,11 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
         splitters[i] = S[splitter_index]; // Select the splitter
     }
 
-    CALI_MARK_END(comp_large);
+    CALI_MARK_END("comp_large");
 
    // Step 2
     int* bucket_sizes = (int*)malloc(num_proc * sizeof(int)); // Array to store the size of each bucket
-
+printf("5\n");
     // Initialize bucket sizes to zero
     for (int i = 0; i < num_proc; i++) {
         bucket_sizes[i] = 0;
@@ -100,7 +103,7 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
             }
         }
     }
-
+printf("6\n");
     // Calculate the displacement for each bucket
     int* bucket_displacements = (int*)malloc(num_proc * sizeof(int));
     bucket_displacements[0] = 0;
@@ -124,63 +127,58 @@ void sampleSort(int A[], int arr_size, int k, int num_proc, int rank, int size) 
             }
         }
     }
-
-    CALI_MARK_END(comp);
+printf("7\n");
+    CALI_MARK_END("comp");
 
     // Step 3 and concatenation
-    void step3_and_concat(int* local_bucket, int* bucket_sizes, int* bucket_displacements, int n, int p, int rank) {
-        // Determine the size of each local bucket
-        int local_bucket_size = bucket_sizes[rank];
-        
-        // Create an array to hold the sizes of all local buckets
-        int* all_bucket_sizes = (int*)malloc(p * sizeof(int));
-        
-        // Use MPI_Allgather to share the local bucket sizes with all processes
-        MPI_Allgather(&local_bucket_size, 1, MPI_INT, all_bucket_sizes, 1, MPI_INT, MPI_COMM_WORLD);
-        
-        // Calculate the total size of all buckets
-        int total_bucket_size = 0;
-        for (int i = 0; i < p; i++) {
-            total_bucket_size += all_bucket_sizes[i];
-        }
-        
-        // Allocate memory for the concatenated array
-        int* concatenated_array = (int*)malloc(total_bucket_size * sizeof(int));
-        
-        // Use MPI_Alltoallv to exchange data between processes
-        MPI_Alltoallv(local_bucket, bucket_sizes, bucket_displacements, MPI_INT,
-                    concatenated_array, all_bucket_sizes, bucket_displacements, MPI_INT, MPI_COMM_WORLD);
-        
-        // Now 'concatenated_array' contains the sorted elements from all buckets
-        // You can use it as needed
-        
-        // Don't forget to free allocated memory when done
-        free(S);
-        free(splitters);
-        free(bucket_sizes);
-        free(bucket_displacements);
-        free(local_bucket);
-        free(all_bucket_sizes);
-        free(concatenated_array);
+    // Determine the size of each local bucket
+    local_bucket_size = bucket_sizes[rank];
+    
+    // Create an array to hold the sizes of all local buckets
+    int* all_bucket_sizes = (int*)malloc(num_proc * sizeof(int));
+    
+    // Use MPI_Allgather to share the local bucket sizes with all processes
+    MPI_Allgather(&local_bucket_size, 1, MPI_INT, all_bucket_sizes, 1, MPI_INT, MPI_COMM_WORLD);
+    
+    // Calculate the total size of all buckets
+    int total_bucket_size = 0;
+    for (int i = 0; i < num_proc; i++) {
+        total_bucket_size += all_bucket_sizes[i];
     }
+    printf("8\n");
+    // Allocate memory for the concatenated array
+    int* concatenated_array = (int*)malloc(total_bucket_size * sizeof(int));
+    
+    // Use MPI_Alltoallv to exchange data between processes
+    MPI_Alltoallv(local_bucket, bucket_sizes, bucket_displacements, MPI_INT,
+                concatenated_array, all_bucket_sizes, bucket_displacements, MPI_INT, MPI_COMM_WORLD);
+    
+    // Now 'concatenated_array' contains the sorted elements from all buckets
+    // You can use it as needed
+    
+    // Don't forget to free allocated memory when done
+    free(S);
+    free(splitters);
+    free(bucket_sizes);
+    free(bucket_displacements);
+    free(local_bucket);
+    free(all_bucket_sizes);
+    free(concatenated_array);
 }
 
 int main(int argc, char** argv) {
     CALI_CXX_MARK_FUNCTION;
-
-    const char* comp = "comp";
-    const char* comp_large = "comp_large";
-    const char* comp_small = "comp_small";
+printf("0\n");
     // const char* comm = "comm";
     // const char* comm_large = "comm_large";
     // const char* comm_small = "comm_small";
-    const char* data_init = "data_init";
-    const char* whole_computation = "whole_computation";
     // const char* correctness_check = "correctness_check";
     // const char* mpi_barrier = "mpi_barrier";
 
-    CALI_MARK_BEGIN(whole_computation);
+    CALI_MARK_BEGIN("whole_computation");
     MPI_Init(&argc, &argv);
+
+    printf("1\n");
 
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -200,9 +198,9 @@ int main(int argc, char** argv) {
 
     int* A = (int*)malloc(arr_size * sizeof(int));
 
-    CALI_MARK_BEGIN(data_init);
     dataInit(A, arr_size);
-    CALI_MARK_END(data_init);
+
+    printf("2\n");
 
     sampleSort(A, arr_size, k, num_proc, rank, size);
 
@@ -226,7 +224,7 @@ int main(int argc, char** argv) {
     free(A);
 
     MPI_Finalize();
-    CALI_MARK_END(whole_computation);
-
+    CALI_MARK_END("whole_computation");
+printf("9\n");
     return 0;
 }
