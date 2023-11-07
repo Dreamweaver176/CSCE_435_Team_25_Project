@@ -297,11 +297,8 @@ CALI_CXX_MARK_FUNCTION;
 };
 
 bool test_array_is_in_order(int arr[]) {
-    int max = 0;
     for (int i = 1; i < LENGTH; i ++) {
-        if (arr[i] >= arr[i - 1]) {
-            max = arr[i];
-        } else {
+        if (arr[i] < arr[i - 1]) {
             printf("Error. Out of order sequence: %d found\n", arr[i]);
             return false;
         }
