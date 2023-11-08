@@ -49,6 +49,12 @@ const char* comm_large = "comm_large";
 const char* comp = "comp";
 const char* comp_small = "comp_small";
 const char* comp_large = "comp_large";
+const char* receive_from_master = "receive_from_master";
+const char* thread_sort = "thread_sort";
+const char* receive_merged_data = "receive_merged_data";
+const char* merge  = "merge";
+const char* recursive_merge = "recursive_merge";
+const char* send_merged_data = "send_merged_data";
 
 MPI_Status status;
 
@@ -109,23 +115,37 @@ mgr.start();
         mtype = FROM_MASTER;
         CALI_MARK_BEGIN(comm);
         CALI_MARK_BEGIN(comm_small);
+        CALI_MARK_BEGIN(receive_from_master);
         MPI_Recv(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
         MPI_Recv(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
-        MPI_Recv(&a, rows, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
         CALI_MARK_END(comm_small);
+        CALI_MARK_BEGIN(comm_large);
+        MPI_Recv(&a, rows, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
+        CALI_MARK_END(receive_from_master);
+        CALI_MARK_END(comm_large);
         CALI_MARK_END(comm);
         //sort dataset
         CALI_MARK_BEGIN(comp);
         CALI_MARK_BEGIN(comp_small);
+        CALI_MARK_BEGIN(thread_sort);
         qsort((void*)a, rows, sizeof(double), compInt);
+        CALI_MARK_END(thread_sort);
         CALI_MARK_END(comp);
         CALI_MARK_END(comp_small);
         //merge up
+        CALI_MARK_BEGIN(comp);
+        CALI_MARK_BEGIN(comp_large);
+        CALI_MARK_BEGIN(recursive_merge);
         recursive_merge(a,b,offset,rows,2);
+        CALI_MARK_END(recursive_merge);
+        CALI_MARK_END(comp);
+        CALI_MARK_END(comp_large);
     }
 
     //check array order
+    CALI_MARK_BEGIN(correctness_check);
     assert(test_array_is_in_order(b));
+    CALI_MARK_END(correctness_check);
 
     //END COMPUTATION
     CALI_MARK_END(whole_computation);
@@ -140,76 +160,20 @@ mgr.start();
     adiak::value("Datatype", "Double"); // The datatype of input elements (e.g., double, int, float)
     adiak::value("SizeOfDatatype", sizeof(Double)); // sizeof(datatype) of input elements in bytes (e.g., 1, 2, 4)
     adiak::value("InputSize", sizeOfMatrix); // The number of elements in input dataset (1000)
-    adiak::value("InputType", inputType); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
+    adiak::value("InputType", "Random"); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
     adiak::value("num_procs", num_tasks); // The number of processors (MPI ranks)
-    // adiak::value("num_threads", num_threads); // The number of CUDA or OpenMP threads
-    // adiak::value("num_blocks", num_blocks); // The number of CUDA blocks 
-    adiak::value("group_num", group_number); // The number of your group (integer, e.g., 1, 10)
+    adiak::value("num_threads", numworkers); // The number of CUDA or OpenMP threads
+    adiak::value("num_blocks", 0); // The number of CUDA blocks 
+    adiak::value("group_num", 25); // The number of your group (integer, e.g., 1, 10)
     adiak::value("implementation_source", "Handwritten") // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
-
-    double worker_receive_time_max,
-      worker_receive_time_min,
-      worker_receive_time_sum,
-      worker_receive_time_average,
-      worker_calculation_time_max,
-      worker_calculation_time_min,
-      worker_calculation_time_sum,
-      worker_calculation_time_average,
-      worker_send_time_max,
-      worker_send_time_min,
-      worker_send_time_sum,
-      worker_send_time_average = 0; 
-
-    if (taskid == 0)
-   {
-      // Master Times
-      printf("******************************************************\n");
-      printf("Master Times:\n");
-      printf("Whole Computation Time: %f \n", whole_computation_time);
-      printf("Master Initialization Time: %f \n", master_initialization_time);
-      printf("Master Send and Receive Time: %f \n", master_send_receive_time);
-      printf("\n******************************************************\n");
-
-      // Add values to Adiak
-      adiak::value("MPI_Reduce-whole_computation_time", whole_computation_time);
-      adiak::value("MPI_Reduce-master_initialization_time", master_initialization_time);
-      adiak::value("MPI_Reduce-master_send_receive_time", master_send_receive_time);
-
-      // Must move values to master for adiak
-      mtype = FROM_WORKER;
-      MPI_Recv(&worker_receive_time_max, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_receive_time_min, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_receive_time_average, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-
-      adiak::value("MPI_Reduce-worker_receive_time_max", worker_receive_time_max);
-      adiak::value("MPI_Reduce-worker_receive_time_min", worker_receive_time_min);
-      adiak::value("MPI_Reduce-worker_receive_time_average", worker_receive_time_average);
-   }
-   else if (taskid == 1)
-   { // Print only from the first worker.
-      // Print out worker time results.
-      
-      // Compute averages after MPI_Reduce
-      worker_receive_time_average = worker_receive_time_sum / (double)numworkers;
-
-      printf("******************************************************\n");
-      printf("Worker Times:\n");
-      printf("Worker Receive Time Max: %f \n", worker_receive_time_max);
-      printf("Worker Receive Time Min: %f \n", worker_receive_time_min);
-      printf("Worker Receive Time Average: %f \n", worker_receive_time_average);
-      printf("\n******************************************************\n");
-
-      mtype = FROM_WORKER;
-      MPI_Send(&worker_receive_time_max, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_receive_time_min, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_receive_time_average, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-   }
 
    // Flush Caliper output before finalizing MPI
    mgr.stop();
    mgr.flush();
 
    MPI_Finalize();
+
+   return 0;
 };
 
 int compInt(const void* a, const void* b) {
@@ -270,17 +234,23 @@ CALI_CXX_MARK_FUNCTION;
         moffset = offset;
         mrows = rows;
         //receive info
-        CALI_MARK_BEGIN(comp);
-        CALI_MARK_BEGIN(comp_small);
+        CALI_MARK_BEGIN(comm);
+        CALI_MARK_BEGIN(comm_small);
+        CALI_MARK_BEGIN(receive_merged_data);
         MPI_Recv(&offset, 1, MPI_INT, taskid + (aggregate/2), mtype, MPI_COMM_WORLD, &status);
         MPI_Recv(&rows, 1, MPI_INT, taskid + (aggregate/2), mtype, MPI_COMM_WORLD, &status);
+        CALI_MARK_END(comm_small);
+        CALI_MARK_BEGIN(comm_large);
         MPI_Recv(&a, rows, MPI_DOUBLE, taskid + (aggregate/2), mtype, MPI_COMM_WORLD, &status);
-        CALI_MARK_BEGIN(comp);
-        CALI_MARK_BEGIN(comp_small);
+        CALI_MARK_END(comm_large);
+        CALI_MARK_END(comm);
+        CALI_MARK_END(receive_merged_data);
         //merge incoming with current (leaves offset as moffset in b with length mrows + rows)
         CALI_MARK_BEGIN(comp);
         CALI_MARK_BEGIN(comp_large);
+        CALI_MARK_BEGIN(merge);
         merge(b, a, b, moffset, mrows, 0, rows);
+        CALI_MARK_END(merge);
         CALI_MARK_END(comp);
         CALI_MARK_END(comp_large);
         //recurse a level up
@@ -290,9 +260,17 @@ CALI_CXX_MARK_FUNCTION;
     }
     //only half the processes are working, so the other half must send their data to the worker
     else {
+        CALI_MARK_BEGIN(comm);
+        CALI_MARK_BEGIN(comm_small);
+        CALI_MARK_BEGIN(send_merged_data);
         MPI_Send(&offset, 1, MPI_INT, taskid - (aggregate/2), mtype, MPI_COMM_WORLD);
         MPI_Send(&rows, 1, MPI_INT, taskid - (aggregate/2), mtype, MPI_COMM_WORLD);
+        CALI_MARK_END(comm_small);
+        CALI_MARK_BEGIN(comm_large);
         MPI_Send(&b[offset], rows, MPI_DOUBLE, taskid - (aggregate/2), mtype, MPI_COMM_WORLD);
+        CALI_MARK_END(comm_large);
+        CALI_MARK_END(comm);
+        CALI_MARK_END(send_merged_data);
     }
 };
 
