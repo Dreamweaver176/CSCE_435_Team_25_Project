@@ -2,12 +2,18 @@
 #include <stdio.h>
 #include <time.h>
 
+#include <iostream>
+#include <algorithm>
+#include <thrust/device_vector.h>                           // ADDED
+#include <thrust/copy.h>
+#include <thrust/sort.h>
+
 #include <caliper/cali.h>
 #include <caliper/cali-manager.h>
 // #include <adiak.hpp>
 
-#include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuda.h>
 
 const char* comm = "comm";
 const char* comm_small = "comm_small";
@@ -19,8 +25,6 @@ const char* comp_small = "comp_small";
 const char* sequential_sort_region = "sequential_sort";
 const char* whole_computation = "whole_computation";
 const char* data_init = "data_init";
-const char* transfer_host_to_device = "transfer_host_to_device";
-const char* transfer_device_to_host = "transfer_device_to_host";
 const char* correctness_check = "correctness_check";
 const char* merge_inside_blocks = "merge_inside_blocks";
 const char* merge_blocks = "merge_blocks";
@@ -103,6 +107,7 @@ int main(int argc, char *argv[]) {
 
     CALI_MARK_BEGIN(whole_computation);
 
+    // Create caliper ConfigManager object
     cali::ConfigManager mgr;
     mgr.start();
     
@@ -129,9 +134,7 @@ int main(int argc, char *argv[]) {
     CALI_MARK_END(comm_large);
     CALI_MARK_END(comm);
 
-    dim3 blocks(BLOCKS-1,1);    /* Number of blocks   */
-    dim3 threads(NUMTHREADS,1);  /* Number of threads  */
-    dim3 kernelBlock(1,1); 
+    CALI_MARK_BEGIN(correctness_check);
 
     // Launch the CUDA kernel for performing merge sort on each block
     CALI_MARK_BEGIN(comp);
@@ -174,8 +177,8 @@ int main(int argc, char *argv[]) {
     free(localArr);
     CALI_MARK_END(correctness_check);
 
+    CALI_MARK_END(correctness_check);
     CALI_MARK_END(whole_computation);
-    
 
     // adiak::init(NULL);
     // adiak::launchdate();    // launch date of the job
@@ -194,5 +197,7 @@ int main(int argc, char *argv[]) {
     // adiak::value("group_num", 25); // The number of your group (integer, e.g., 1, 10)
     // adiak::value("implementation_source", "Online/AI/Handwritten") // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
 
-    return 0;
-}
+    // Flush Caliper output before finalizing MPI
+    mgr.stop();
+    mgr.flush();
+};
