@@ -2,6 +2,12 @@
 #include <stdio.h>
 #include <time.h>
 
+#include <iostream>
+#include <algorithm>
+#include <thrust/device_vector.h>                           // ADDED
+#include <thrust/copy.h>
+#include <thrust/sort.h>
+
 #include <caliper/cali.h>
 #include <caliper/cali-manager.h>
 #include <adiak.hpp>
@@ -31,12 +37,12 @@ void print_elapsed(clock_t start, clock_t stop)
 {
   double elapsed = ((double) (stop - start)) / CLOCKS_PER_SEC;
   printf("Elapsed time: %.3fs\n", elapsed);
-}
+};
 
 float random_float()
 {
   return (float)rand()/(float)RAND_MAX;
-}
+};
 
 void array_print(float *arr, int length) 
 {
@@ -45,7 +51,7 @@ void array_print(float *arr, int length)
     printf("%1.3f ",  arr[i]);
   }
   printf("\n");
-}
+};
 
 void array_fill(float *arr, int length)
 {
@@ -54,83 +60,61 @@ void array_fill(float *arr, int length)
   for (i = 0; i < length; ++i) {
     arr[i] = random_float();
   }
-}
+};
 
-__global__ void bitonic_sort_step(float *dev_values, int j, int k)
-{
-  unsigned int i, ixj; /* Sorting partners: i and ixj */
-  i = threadIdx.x + blockDim.x * blockIdx.x;
-  ixj = i^j;
+__global__ void sortBlock(float* block, int block_size) {
+    thrust::device_ptr<float> dev_ptr(block);
+    thrust::sort(dev_ptr, dev_ptr + block_size);
+};
 
-  /* The threads with the lowest ids sort the array. */
-  if ((ixj)>i) {
-    if ((i&k)==0) {
-      /* Sort ascending */
-      if (dev_values[i]>dev_values[ixj]) {
-        /* exchange(i,ixj); */
-        float temp = dev_values[i];
-        dev_values[i] = dev_values[ixj];
-        dev_values[ixj] = temp;
-      }
-    }
-    if ((i&k)!=0) {
-      /* Sort descending */
-      if (dev_values[i]<dev_values[ixj]) {
-        /* exchange(i,ixj); */
-        float temp = dev_values[i];
-        dev_values[i] = dev_values[ixj];
-        dev_values[ixj] = temp;
-      }
-    }
-  }
-}
+void sample_sort(float* values, int num_vals, int num_threads, int num_blocks) {
+    int block_size = num_vals / num_blocks;
 
-/**
- * Inplace sample sort using CUDA.
- */
-void sample_sort(float* A, int n, int k, int p) {
-    // Step 1: select S randomly and sort it
-    std::vector<float> S;
-    for (int i = 0; i < p*k; i++) {
-        S.push_back(A[rand() % n]); // Randomly select samples from A
-    }
-    std::sort(S.begin(), S.end()); // Sort samples
+    // Allocate device memory for the input values
+    float* d_values;
+    cudaMalloc((void**)&d_values, num_vals * sizeof(float));
+    cudaMemcpy(d_values, values, num_vals * sizeof(float), cudaMemcpyHostToDevice);
 
-    // Create an array of splitters
-    float splitters[p+1];
-    splitters[0] = -INFINITY;
-    splitters[p] = INFINITY;
-    for (int i = 1; i < p; i++) {
-        splitters[i] = S[i*k];
+    // Sort each block in parallel
+    for (int i = 0; i < num_blocks; i++) {
+        float* d_block = d_values + i * block_size;
+        sortBlock<<<1, 1>>>(d_block, block_size);
     }
 
-    // Step 2: Place elements in buckets
-    std::vector<std::vector<float>> buckets(p);
+    // Allocate host memory for the sample values
+    float* samples = (float*)malloc(num_blocks * sizeof(float));
 
-    for (int i = 0; i < n; i++) {
-        float a = A[i];
-        int j;
-        for (j = 0; j < p; j++) {
-            if (splitters[j] < a && a <= splitters[j+1]) {
-                buckets[j].push_back(a);
-                break;
-            }
-        }
+    // Select and copy samples from each block to host
+    for (int i = 0; i < num_blocks; i++) {
+        float* d_block = d_values + i * block_size;
+        cudaMemcpy(samples + i, d_block + block_size / 2, sizeof(float), cudaMemcpyDeviceToHost);
     }
 
-    // Step 3 and concatenation
-    for (int i = 0; i < p; i++) {
-        sample_sort(buckets[i].data());
-    }
+    // Sort the samples
+    thrust::device_vector<float> dev_samples(samples, samples + num_blocks);
+    thrust::sort(dev_samples.begin(), dev_samples.end());
 
-    // Concatenate buckets back into A
-    int idx = 0;
-    for (int i = 0; i < p; i++) {
-        for (int j = 0; j < buckets[i].size(); j++) {
-            A[idx++] = buckets[i][j];
-        }
-    }
-}
+    // Determine split points for merging
+    float* split_points = thrust::raw_pointer_cast(dev_samples.data());
+    float* d_split_points;
+    cudaMalloc((void**)&d_split_points, num_blocks * sizeof(float));
+    cudaMemcpy(d_split_points, split_points, num_blocks * sizeof(float), cudaMemcpyHostToDevice);
+
+    // Merge the blocks based on split points
+    float* d_result;
+    cudaMalloc((void**)&d_result, num_vals * sizeof(float));
+    cudaDeviceSynchronize();
+
+    // Implement merge based on split points (not provided here)
+
+    // Copy the sorted result back to host
+    cudaMemcpy(values, d_result, num_vals * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Cleanup device memory
+    cudaFree(d_values);
+    cudaFree(d_split_points);
+    cudaFree(d_result);
+};
 
 int main(int argc, char *argv[])
 {
@@ -150,11 +134,29 @@ int main(int argc, char *argv[])
     cali::ConfigManager mgr;
     mgr.start();
 
+    CALI_MARK_BEGIN(data_init);
+
     float *values = (float*) malloc( NUM_VALS * sizeof(float));
     array_fill(values, NUM_VALS);
 
-    sample_sort(values, NUM_VALS, THREADS, /*p*/); /* Inplace */
+    CALI_MARK_END(data_init);
 
+    sample_sort(values, NUM_VALS, THREADS, BLOCKS); // Inplace                                                  BLOCKS WRONG?
+
+    CALI_MARK_BEGIN(correctness_check);
+
+    bool sorted = true;
+    for (int i = 1; i < NUM_VALS; i++) {
+        if (values[i] < values[i-1]) {
+            printf("Error. Out of order sequence: %d found\n", values[i]);
+            sorted = false;
+        }
+    }
+    if (sorted) {
+        printf("Array is in sorted order\n");
+    }
+
+    CALI_MARK_END(correctness_check);
     CALI_MARK_END(whole_computation);
 
     adiak::init(NULL);
