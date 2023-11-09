@@ -93,6 +93,10 @@ Instrument your code, and turn in at least one Caliper file per algorithm;
 if you have implemented an MPI and a CUDA version of your algorithm,
 turn in a Caliper file for each.
 
+## Merge Sort Algorithm Explanation and Questions (Connor)
+The algorithms are implemented similarly across CUDA and MPI, however there are some slight differences. For MPI, the data is distributed across all the worker threads, who use a quicksort to sort their individual chunks. After that has finished, half of the workers will send their data to their neighbor, and the other half will receive that data and merge the two received lists. This repeats until we have reassembled the list we started with sorted. For CUDA, the difference is that once we send the data to blocks, the blocks cannot access the memory of each other. Because of this, we will do the same procedure as above, where we pass out data to the threads inside the blocks which then sort their sections and merge back up to one whole set. Then, we must launch the kernel again with 1 block containing the whole data set, redefine our block boundaries, and perform the same merging process with the threads in this one last block until we have a fully sorted set the same as our original.
+Questions for the TA: are any of these methods inefficient enough to deserve reworking? While some of this was referenced from online, I came up with most of this by myself, so I have no idea how optimal it actually is, especially since we currently don't have access to thicket to check these unless I can figure out how to set it up on Terra. Also as a footnote, as my commit message says, issues have resulted in me being unable to obtain a .cali file for the CUDA implementation. However, as a complete anecdote, after running the CUDA code so many times, it does seem to perform in similar time right now just from observation on completion time, for what that is worth. 
+
 ### 3a. Caliper instrumentation
 Please use the caliper build `/scratch/group/csce435-f23/Caliper/caliper/share/cmake/caliper` 
 (same as lab1 build.sh) to collect caliper files for each experiment you run.
@@ -200,6 +204,7 @@ CALI_MARK_END("comp");
 │  └─ 1.000 comp_large
 └─ 1.000 data_init
 ```
+
 
 #### 3b. Collect Metadata
 
