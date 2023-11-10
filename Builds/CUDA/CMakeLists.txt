@@ -17,5 +17,5 @@ include_directories(${CUDA_INCLUDE_DIRS})
 include_directories(${caliper_INCLUDE_DIR})
 include_directories(${adiak_INCLUDE_DIRS})
 
-target_link_libraries(bitonic PRIVATE MPI::MPI_CXX)
-target_link_libraries(bitonic PRIVATE caliper)
+target_link_libraries(samplesort PRIVATE MPI::MPI_CXX)
+target_link_libraries(samplesort PRIVATE caliper)
