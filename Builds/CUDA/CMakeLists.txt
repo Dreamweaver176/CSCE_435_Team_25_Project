@@ -6,7 +6,7 @@ find_package(MPI REQUIRED)
 find_package(caliper REQUIRED)
 find_package(adiak REQUIRED)
 
-add_executable(bitonic bitonic_sort.cu)
+add_executable(samplesort samplesort.cu)
 
 message(STATUS "MPI includes : ${MPI_INCLUDE_PATH}")
 message(STATUS "CUDA includes : ${CUDA_INCLUDE_DIRS}")
