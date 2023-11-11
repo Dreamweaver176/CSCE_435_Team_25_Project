@@ -227,6 +227,13 @@ They will show up in the `Thicket.metadata` if the caliper file is read into Thi
 
 **See the `Builds/` directory to find the correct Caliper configurations to get the above metrics for CUDA, MPI, or OpenMP programs.** They will show up in the `Thicket.dataframe` when the Caliper file is read into Thicket.
 
+## Samplesort Algorithm Descriptions (Noah)
+The files themselves are based on their counterparts in the previous labs (i.e. samplesort.cpp was based on mpi_mm.cpp and samplesort.cu was based on bitonic_sort.cu), and changed to suit the needs of this project. The algorithm itself closely followed the linked pseudocode in this report within samplesort.cpp. In samplesort.cu however the blocks cannot access memory from others, so the array is split into samples and sorted separately using an altered method.
+
+Questions for the instructor/TA:
+1. I am unsure of what the parameters in the performance evaluation mean. We meant to run the MPI code with the number of processes varying from 2 to 1024, but what array sizes do we use? For CUDA, the number of threads will vary from 64 to 4096, but do the number of values range from 2^16 to 2^28 like in inputSizes? Additionally, would some combinations of the below values run for too long?
+2. What is a good way to verify that the CUDA_MARK functions for comm, comp, and the other values are correct?
+
 ## 4. Performance evaluation
 
 Include detailed analysis of computation performance, communication performance. 
