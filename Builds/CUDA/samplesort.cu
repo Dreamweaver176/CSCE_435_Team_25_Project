@@ -19,9 +19,6 @@ int THREADS;
 int BLOCKS;
 int NUM_VALS;
 
-// const char* bitonic_sort_step_region = "bitonic_sort_step";
-// const char* cudaMemcpy_host_to_device = "cudaMemcpy_host_to_device";
-// const char* cudaMemcpy_device_to_host = "cudaMemcpy_device_to_host";
 /* Define Caliper region names */
 const char* whole_computation = "whole_computation";
 const char* data_init = "data_init";
@@ -62,63 +59,93 @@ void array_fill(float *arr, int length)
   }
 };
 
-__global__ void sortBlock(float* block, int block_size) {
-    thrust::device_ptr<float> dev_ptr(block);
-    thrust::sort(dev_ptr, dev_ptr + block_size);
-};
-
 void sample_sort(float* values, int num_vals, int num_threads, int num_blocks) {
+    CALI_CXX_MARK_FUNCTION;
     int block_size = num_vals / num_blocks;
+
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_large);
 
     // Allocate device memory for the input values
     float* d_values;
     cudaMalloc((void**)&d_values, num_vals * sizeof(float));
     cudaMemcpy(d_values, values, num_vals * sizeof(float), cudaMemcpyHostToDevice);
 
+    CALI_MARK_END(comm_large);
+    CALI_MARK_END(comm);
+
+    CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_large);
+
     // Sort each block in parallel
     for (int i = 0; i < num_blocks; i++) {
         float* d_block = d_values + i * block_size;
-        sortBlock<<<1, 1>>>(d_block, block_size);
+        thrust::device_ptr<float> dev_ptr(d_block);
+        thrust::sort(dev_ptr, dev_ptr + block_size);
     }
 
-    // Allocate host memory for the sample values
-    float* samples = (float*)malloc(num_blocks * sizeof(float));
+    CALI_MARK_END(comp_large);
+    CALI_MARK_END(comp);
 
-    // Select and copy samples from each block to host
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_small);
+
+    // Allocate device memory for the sample values
+    float* d_samples;
+    cudaMalloc((void**)&d_samples, num_blocks * sizeof(float));
+
+    // Select and copy samples from each block to device
     for (int i = 0; i < num_blocks; i++) {
         float* d_block = d_values + i * block_size;
-        cudaMemcpy(samples + i, d_block + block_size / 2, sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(d_samples + i, d_block + block_size / 2, sizeof(float), cudaMemcpyDeviceToDevice);
     }
 
+    CALI_MARK_END(comm_small);
+    CALI_MARK_END(comm);
+
+    CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_small);
+
     // Sort the samples
-    thrust::device_vector<float> dev_samples(samples, samples + num_blocks);
-    thrust::sort(dev_samples.begin(), dev_samples.end());
+    thrust::device_ptr<float> dev_samples(d_samples);
+    thrust::sort(dev_samples, dev_samples + num_blocks);
+
+    CALI_MARK_END(comp_small);
+    CALI_MARK_END(comp);
+
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_small);
 
     // Determine split points for merging
-    float* split_points = thrust::raw_pointer_cast(dev_samples.data());
+    float* split_points = thrust::raw_pointer_cast(dev_samples);
     float* d_split_points;
     cudaMalloc((void**)&d_split_points, num_blocks * sizeof(float));
-    cudaMemcpy(d_split_points, split_points, num_blocks * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_split_points, split_points, num_blocks * sizeof(float), cudaMemcpyDeviceToDevice);
 
     // Merge the blocks based on split points
     float* d_result;
     cudaMalloc((void**)&d_result, num_vals * sizeof(float));
-    cudaDeviceSynchronize();
 
-    // Implement merge based on split points (not provided here)
+    CALI_MARK_END(comm_small);
 
     // Copy the sorted result back to host
     cudaMemcpy(values, d_result, num_vals * sizeof(float), cudaMemcpyDeviceToHost);
 
+    // Ensure that all CUDA operations are completed
+    CALI_MARK_END(comm);
+
+    cudaDeviceSynchronize();
+
     // Cleanup device memory
     cudaFree(d_values);
+    cudaFree(d_samples);
     cudaFree(d_split_points);
     cudaFree(d_result);
 };
 
 int main(int argc, char *argv[])
 {
-    //CALI_CXX_MARK_FUNCTION;                                                PROBABLY UNNEEDED
+    CALI_CXX_MARK_FUNCTION;                        //                        PROBABLY UNNEEDED
 
     THREADS = atoi(argv[1]);
     NUM_VALS = atoi(argv[2]);
@@ -141,7 +168,7 @@ int main(int argc, char *argv[])
 
     CALI_MARK_END(data_init);
 
-    sample_sort(values, NUM_VALS, THREADS, BLOCKS); // Inplace                                                  BLOCKS WRONG?
+    sample_sort(values, NUM_VALS, THREADS, BLOCKS);
 
     CALI_MARK_BEGIN(correctness_check);
 
@@ -174,7 +201,7 @@ int main(int argc, char *argv[])
     adiak::value("num_threads", THREADS); // The number of CUDA or OpenMP threads
     adiak::value("num_blocks", BLOCKS); // The number of CUDA blocks 
     adiak::value("group_num", 25); // The number of your group (integer, e.g., 1, 10)
-    adiak::value("implementation_source", "AI/Handwritten") // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
+    adiak::value("implementation_source", "AI/Handwritten"); // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
 
     // Flush Caliper output before finalizing MPI
     mgr.stop();
