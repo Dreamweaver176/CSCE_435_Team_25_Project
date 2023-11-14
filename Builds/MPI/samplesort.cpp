@@ -23,6 +23,13 @@ const char* comp_small = "comp_small";
 const char* comp_large = "comp_large";
 const char* correctness_check = "correctness_check";
 
+void randomFill(double arr[], int n) {
+    srand(time(NULL));
+    for(int i = 0; i < n; i++) {
+        arr[i] = (double)(rand() % n);
+    }
+};
+
 void smallSort(double arr[], int left, int right) {
     if (left < right) {
         // Partition the array
@@ -80,9 +87,9 @@ void sampleSort(double arr[], int n, int k, int p) {
     double splitters[p+1];
     splitters[0] = INT_MIN;
     for (int i = 1; i < p; i++) {
-        splitters[i] = S[i*k];
+        splitters[i] = S[i*(k-1)];
     }
-    splitters[p] = INT_MIN;
+    splitters[p] = INT_MAX;
 
     CALI_MARK_END(comm_small);
     CALI_MARK_END(comm);
@@ -174,11 +181,7 @@ if (taskid == MASTER)
 
     CALI_MARK_BEGIN(data_init);
 
-    srand(time(NULL));
-    for(int i = 0; i < sizeOfArray; i++) {
-        double num = (double)rand();
-        a[i] = num;
-    }
+    randomFill(a, sizeOfArray);
 
     CALI_MARK_END(data_init);
 
@@ -207,20 +210,20 @@ if (taskid == MASTER)
 
 
 /**************************** worker task ************************************/
-if (taskid > MASTER)
-{
-    mtype = FROM_MASTER;
+//if (taskid > MASTER)
+//{
+    mtype = FROM_WORKER;
 
-    CALI_MARK_BEGIN(comm);
-    CALI_MARK_BEGIN(comm_large);
+    //CALI_MARK_BEGIN(comm);
+    //CALI_MARK_BEGIN(comm_large);
 
-    MPI_Recv(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
-    MPI_Recv(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
-    MPI_Recv(&a[offset], rows, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
+    //MPI_Recv(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
+    //MPI_Recv(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
+    //MPI_Recv(&a[offset], rows, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
     //MPI_Recv(&b, sizeOfArray*sizeOfArray, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
 
-    CALI_MARK_END(comm_large);
-    CALI_MARK_END(comm);
+    //CALI_MARK_END(comm_large);
+   // CALI_MARK_END(comm);
 
     // CALI_MARK_BEGIN(comp);
     // CALI_MARK_BEGIN(comp_small);
@@ -237,14 +240,14 @@ if (taskid > MASTER)
 
     // CALI_MARK_END(comp_large);
     // CALI_MARK_END(comp);
-}
+//}
 
 CALI_MARK_BEGIN(correctness_check);
 
 bool sorted = true;
 for (int i = 1; i < sizeOfArray; i++) {
     if (a[i] < a[i-1]) {
-        printf("Error. Out of order sequence: %d found\n", a[i]);
+        printf("Error. Out of order sequence: %f found\n", a[i]);
         sorted = false;
     }
 }
