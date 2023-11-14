@@ -145,7 +145,7 @@ void sample_sort(float* values, int num_vals, int num_threads, int num_blocks) {
 
 int main(int argc, char *argv[])
 {
-    CALI_CXX_MARK_FUNCTION;                        //                        PROBABLY UNNEEDED
+    CALI_CXX_MARK_FUNCTION;
 
     THREADS = atoi(argv[1]);
     NUM_VALS = atoi(argv[2]);
@@ -175,7 +175,7 @@ int main(int argc, char *argv[])
     bool sorted = true;
     for (int i = 1; i < NUM_VALS; i++) {
         if (values[i] < values[i-1]) {
-            printf("Error. Out of order sequence: %d found\n", values[i]);
+            printf("Error. Out of order sequence: %f found\n", values[i]);
             sorted = false;
         }
     }
