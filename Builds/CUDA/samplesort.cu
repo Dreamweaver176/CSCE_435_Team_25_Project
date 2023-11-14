@@ -4,9 +4,6 @@
 
 #include <iostream>
 #include <algorithm>
-#include <thrust/device_vector.h>                           // ADDED
-#include <thrust/copy.h>
-#include <thrust/sort.h>
 
 #include <caliper/cali.h>
 #include <caliper/cali-manager.h>
@@ -59,88 +56,75 @@ void array_fill(float *arr, int length)
   }
 };
 
+__global__ void merge(float* values, int num_vals, float* temp) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int left = 2 * idx * num_vals / (2 * blockDim.x * gridDim.x);
+    int right = (2 * idx + 1) * num_vals / (2 * blockDim.x * gridDim.x);
+    int end = (2 * idx + 2) * num_vals / (2 * blockDim.x * gridDim.x);
+    
+    if (end > num_vals) end = num_vals;
+
+    int i = left;
+    int j = right;
+    int k = left;
+
+    while (i < right && j < end) {
+        if (values[i] <= values[j]) {
+            temp[k++] = values[i++];
+        } else {
+            temp[k++] = values[j++];
+        }
+    }
+
+    while (i < right) {
+        temp[k++] = values[i++];
+    }
+
+    while (j < end) {
+        temp[k++] = values[j++];
+    }
+
+    // Copy the merged data back to the original array
+    for (int i = left; i < end; ++i) {
+        values[i] = temp[i];
+    }
+};
+
 void sample_sort(float* values, int num_vals, int num_threads, int num_blocks) {
     CALI_CXX_MARK_FUNCTION;
-    int block_size = num_vals / num_blocks;
 
-    CALI_MARK_BEGIN(comm);
-    CALI_MARK_BEGIN(comm_large);
+    CALI_MARK_BEGIN(comp);
 
-    // Allocate device memory for the input values
+    int block_size = num_threads;
+    int grid_size = num_blocks;
+
     float* d_values;
     cudaMalloc((void**)&d_values, num_vals * sizeof(float));
     cudaMemcpy(d_values, values, num_vals * sizeof(float), cudaMemcpyHostToDevice);
 
-    CALI_MARK_END(comm_large);
-    CALI_MARK_END(comm);
+    float* d_temp;
+    cudaMalloc((void**)&d_temp, num_vals * sizeof(float));
 
-    CALI_MARK_BEGIN(comp);
-    CALI_MARK_BEGIN(comp_large);
-
-    // Sort each block in parallel
-    for (int i = 0; i < num_blocks; i++) {
-        float* d_block = d_values + i * block_size;
-        thrust::device_ptr<float> dev_ptr(d_block);
-        thrust::sort(dev_ptr, dev_ptr + block_size);
+    // Sort each block independently
+    for (int i = 0; i < grid_size; ++i) {
+        int offset = i * num_vals / grid_size;
+        std::sort(values + offset, values + offset + num_vals / grid_size);
     }
 
-    CALI_MARK_END(comp_large);
-    CALI_MARK_END(comp);
-
-    CALI_MARK_BEGIN(comm);
-    CALI_MARK_BEGIN(comm_small);
-
-    // Allocate device memory for the sample values
-    float* d_samples;
-    cudaMalloc((void**)&d_samples, num_blocks * sizeof(float));
-
-    // Select and copy samples from each block to device
-    for (int i = 0; i < num_blocks; i++) {
-        float* d_block = d_values + i * block_size;
-        cudaMemcpy(d_samples + i, d_block + block_size / 2, sizeof(float), cudaMemcpyDeviceToDevice);
+    // Merge sorted blocks
+    for (int size = num_vals / grid_size; size < num_vals; size *= 2) {
+        for (int i = 0; i < grid_size; i += 2) {
+            int offset = i * num_vals / grid_size;
+            merge<<<1, block_size>>>(d_values + offset, num_vals, d_temp);
+            cudaDeviceSynchronize();
+        }
+        cudaMemcpy(values, d_values, num_vals * sizeof(float), cudaMemcpyDeviceToHost);
     }
 
-    CALI_MARK_END(comm_small);
-    CALI_MARK_END(comm);
-
-    CALI_MARK_BEGIN(comp);
-    CALI_MARK_BEGIN(comp_small);
-
-    // Sort the samples
-    thrust::device_ptr<float> dev_samples(d_samples);
-    thrust::sort(dev_samples, dev_samples + num_blocks);
-
-    CALI_MARK_END(comp_small);
-    CALI_MARK_END(comp);
-
-    CALI_MARK_BEGIN(comm);
-    CALI_MARK_BEGIN(comm_small);
-
-    // Determine split points for merging
-    float* split_points = thrust::raw_pointer_cast(dev_samples);
-    float* d_split_points;
-    cudaMalloc((void**)&d_split_points, num_blocks * sizeof(float));
-    cudaMemcpy(d_split_points, split_points, num_blocks * sizeof(float), cudaMemcpyDeviceToDevice);
-
-    // Merge the blocks based on split points
-    float* d_result;
-    cudaMalloc((void**)&d_result, num_vals * sizeof(float));
-
-    CALI_MARK_END(comm_small);
-
-    // Copy the sorted result back to host
-    cudaMemcpy(values, d_result, num_vals * sizeof(float), cudaMemcpyDeviceToHost);
-
-    // Ensure that all CUDA operations are completed
-    CALI_MARK_END(comm);
-
-    cudaDeviceSynchronize();
-
-    // Cleanup device memory
     cudaFree(d_values);
-    cudaFree(d_samples);
-    cudaFree(d_split_points);
-    cudaFree(d_result);
+    cudaFree(d_temp);
+
+    CALI_MARK_END(comp);
 };
 
 int main(int argc, char *argv[])
