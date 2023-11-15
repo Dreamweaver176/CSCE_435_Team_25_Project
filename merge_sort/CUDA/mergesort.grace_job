@@ -11,6 +11,7 @@
 #SBATCH --output=output.%j       #Send stdout/err to "output.[jobID]" 
 #SBATCH --gres=gpu:1                 #Request GPU per node can be 1 or 2
 #SBATCH --partition=gpu              #Request the GPU partition/queue
+#SBATCH --gres=gpu:a100:1        #(N is either 1 or 2)
 #
 ##OPTIONAL JOB SPECIFICATIONS
 ##SBATCH --mail-type=ALL              #Send email on all job events
@@ -18,6 +19,7 @@
 #
 ##First Executable Line
 
+data_order=$3
 num_threads=$2
 num_vals=$1
 #
@@ -26,6 +28,6 @@ module load intel/2020b
 module load GCCcore/7.3.0
 #
 
-CALI_CONFIG="spot(output=t${num_threads}-v${num_vals}.cali), \
+CALI_CONFIG="spot(output=t${num_threads}-v${num_vals}-d${data_order}.cali), \
     cuda.gputime" \
-./mergesort_cuda $num_threads $num_vals
+./mergesort_cuda $num_vals $num_threads $data_order
