@@ -24,10 +24,29 @@ const char* comp_large = "comp_large";
 const char* correctness_check = "correctness_check";
 
 void randomFill(double arr[], int n) {
-    srand(time(NULL));
+    // for(int i = 0; i < n; i++) {                   // Sorted
+    //     arr[i] = static_cast<double>(i);
+    // }
+
+    srand(time(NULL));                             // Random
     for(int i = 0; i < n; i++) {
-        arr[i] = (double)(rand() % n);
+        arr[i] = static_cast<double>(rand() % n);
+        // if (n-i < 50) {
+        //     printf("arr[i] = %f\n", arr[i]);
+        // }
     }
+
+    // for(int i = 0; i < n; i++) {                   // Reverse sorted
+    //     arr[i] = static_cast<double>(n - i);
+    // }
+
+    // srand(time(NULL));                             // 1%perturbed
+    // for(int i = 0; i < n; i++) {
+    //     arr[i] = static_cast<double>(i);
+    //     if (rand() % 100 == 1) {
+    //         arr[i] *= static_cast<double>(rand() % 10 + 0.5);
+    //     }
+    // }
 };
 
 void smallSort(double arr[], int left, int right) {
@@ -59,6 +78,7 @@ void sampleSort(double arr[], int n, int k, int p) {
 
     // Step 1
     if (n / k < threshold) {
+    printf("small sort\n");
         CALI_MARK_BEGIN(comp);
         CALI_MARK_BEGIN(comp_small);
         smallSort(arr, 0, n - 1); // Use smallSort if average bucket size is below threshold
@@ -73,6 +93,7 @@ void sampleSort(double arr[], int n, int k, int p) {
     // Select samples and sort them
     double S[p*k];
     for (int i = 0; i < p*k; i++) {
+    printf("select samples\n");
         S[i] = arr[rand() % n]; // Randomly select samples from A
     }
     smallSort(S, 0, p*k - 1); // Sort the samples
@@ -87,6 +108,7 @@ void sampleSort(double arr[], int n, int k, int p) {
     double splitters[p+1];
     splitters[0] = INT_MIN;
     for (int i = 1; i < p; i++) {
+    printf("splitters\n");
         splitters[i] = S[i*(k-1)];
     }
     splitters[p] = INT_MAX;
@@ -102,6 +124,7 @@ void sampleSort(double arr[], int n, int k, int p) {
 
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < p; j++) {
+        printf("buckets\n");
             if (arr[i] > splitters[j] && arr[i] <= splitters[j+1]) {
                 buckets[j].push_back(arr[i]);
                 break;
@@ -115,6 +138,7 @@ void sampleSort(double arr[], int n, int k, int p) {
     // Step 3 and concatenation
     int index = 0;  // Start index in the original array
     for (int i = 0; i < p; i++) {
+    printf("concatenate\n");
         sampleSort(buckets[i].data(), buckets[i].size(), k, p);
         std::copy(buckets[i].begin(), buckets[i].end(), arr + index);
         index += buckets[i].size();
@@ -125,16 +149,7 @@ int main (int argc, char *argv[])
 {
 CALI_CXX_MARK_FUNCTION;
     
-int sizeOfArray;
-if (argc == 2)
-{
-    sizeOfArray = atoi(argv[1]);
-}
-else
-{
-    printf("\n Please provide the size of the array");
-    return 0;
-}
+int sizeOfArray = atoi(argv[1]);
 
 int	numtasks,              /* number of tasks in partition */
 	taskid,                /* a task identifier */
@@ -146,25 +161,26 @@ int	numtasks,              /* number of tasks in partition */
 	averow, extra, offset, /* used to determine rows sent to each worker */
 	i, j, k, rc;           /* misc */
 
-double a[sizeOfArray],     /* array 1 */
-	b[sizeOfArray];        /* array 2 */                                                       // get rid of b?
+double a[sizeOfArray];     /* array 1 */
 
 MPI_Status status;
-
+printf("1111111111\n");
 MPI_Init(&argc,&argv);
+printf("222\n");
 MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
+printf("333\n");
 MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
-
+printf("444\n");
 if (numtasks < 2 ) {
     printf("Need at least two MPI tasks. Quitting...\n");
     MPI_Abort(MPI_COMM_WORLD, rc);
     exit(1);
 }
 numworkers = numtasks-1;
-
-// MPI_Comm new_comm;
-// // MPI_Comm_split(MPI_COMM_WORLD, (taskid != MASTER), taskid, &new_comm);                             TRY IF THINGS GO WRONG
-// MPI_Comm_split(MPI_COMM_WORLD, (taskid == MASTER) ? MPI_UNDEFINED : 0, 0, &new_comm);
+printf("2222222222222\n");
+MPI_Comm new_comm;
+// MPI_Comm_split(MPI_COMM_WORLD, (taskid != MASTER), taskid, &new_comm);                             TRY IF THINGS GO WRONG
+MPI_Comm_split(MPI_COMM_WORLD, (taskid == MASTER) ? MPI_UNDEFINED : 0, 0, &new_comm);
 
 // WHOLE PROGRAM COMPUTATION PART STARTS HERE
 CALI_MARK_BEGIN(whole_computation);
@@ -172,12 +188,15 @@ CALI_MARK_BEGIN(whole_computation);
 // Create caliper ConfigManager object
 cali::ConfigManager mgr;
 mgr.start();
+printf("Startttttttttttt\n");
 
 /**************************** master task ************************************/
 if (taskid == MASTER)
 {
     printf("sample sort has started with %d tasks.\n",numtasks);
     printf("Initializing arrays...\n");
+
+    begin = true;
 
     CALI_MARK_BEGIN(data_init);
 
@@ -210,20 +229,20 @@ if (taskid == MASTER)
 
 
 /**************************** worker task ************************************/
-//if (taskid > MASTER)
-//{
-    mtype = FROM_WORKER;
+if (taskid > MASTER)
+{
+    mtype = FROM_MASTER;
 
-    //CALI_MARK_BEGIN(comm);
-    //CALI_MARK_BEGIN(comm_large);
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_large);
 
-    //MPI_Recv(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
-    //MPI_Recv(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
-    //MPI_Recv(&a[offset], rows, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
+    MPI_Recv(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
+    MPI_Recv(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
+    MPI_Recv(&a[offset], rows, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
     //MPI_Recv(&b, sizeOfArray*sizeOfArray, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD, &status);
 
-    //CALI_MARK_END(comm_large);
-   // CALI_MARK_END(comm);
+    CALI_MARK_END(comm_large);
+    CALI_MARK_END(comm);
 
     // CALI_MARK_BEGIN(comp);
     // CALI_MARK_BEGIN(comp_small);
@@ -235,17 +254,24 @@ if (taskid == MASTER)
 
     // CALI_MARK_BEGIN(comp);
     // CALI_MARK_BEGIN(comp_large);
-
+// for (int i = 0; i < sizeOfArray; i++) {
+//     if (sizeOfArray-i < 50) {
+//             printf("a[i] = %f\n", a[i]);
+//         }
+// }
     sampleSort(a, sizeOfArray, sizeOfArray/(2*numtasks), numtasks); // function to implement                         use array b?
 
     // CALI_MARK_END(comp_large);
     // CALI_MARK_END(comp);
-//}
+}
 
 CALI_MARK_BEGIN(correctness_check);
 
 bool sorted = true;
 for (int i = 1; i < sizeOfArray; i++) {
+    // if (sizeOfArray-i < 50) {
+    //     printf("a[i]: %f\n", a[i]);
+    // }
     if (a[i] < a[i-1]) {
         printf("Error. Out of order sequence: %f found\n", a[i]);
         sorted = false;
@@ -275,7 +301,7 @@ adiak::value("num_procs", numtasks); // The number of processors (MPI ranks)
 adiak::value("group_num", 25); // The number of your group (integer, e.g., 1, 10)
 adiak::value("implementation_source", "AI/Handwritten"); // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
 
-//MPI_Comm_free(&new_comm);
+MPI_Comm_free(&new_comm);
 
 // Flush Caliper output before finalizing MPI
 mgr.stop();
