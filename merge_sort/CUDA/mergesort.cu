@@ -90,7 +90,8 @@ __device__ void recursive_merge(double *data, int size, int aggregate) {
 __global__ void mergeSortKernel(double *data, int size) {
     //figure out which section of the shared, block-level data we're working with
     int taskid = threadIdx.x;
-    int blocks = (size + blockDim.x - 1) / blockDim.x;
+    int blocks = size / (blockDim.x * blockDim.x);
+    int blockend = blockIdx.x * (size / blocks);
     int start = taskid * blocks;
     int end = (taskid + 1) * blocks;
     printf("blockid: %d, taskid: %d, start: %d, end: %d\n", blockIdx.x, taskid, start, end);
@@ -159,7 +160,7 @@ int main(int argc, char *argv[]) {
     sizeOfMatrix = atoi(argv[1]);
     NUMTHREADS = atoi(argv[2]);
     data_order = *(argv[3]);
-    BLOCKS = (sizeOfMatrix + NUMTHREADS - 1) / NUMTHREADS;
+    BLOCKS = sizeOfMatrix / (NUMTHREADS * NUMTHREADS);
 
     double *localArr = (double*)malloc(sizeOfMatrix * sizeof(double));
     double* remoteArr;
