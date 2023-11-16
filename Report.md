@@ -283,6 +283,9 @@ perform runs that invoke algorithm2 for Sorted, ReverseSorted, and Random data).
 `Intel top-down`: For your CPU-only experiments on the scale of a single node, you should
 generate additional performance data, measuring the hardware counters on the CPU. This can be done by adding `topdown.all` to the `spot()` options in the `CALI_CONFIG` in your jobfile.
 
+## Performance Evaluation (Noah)
+I have been working on this portion of the project since the moment it was been released, but despite hours and hours of work, I have made little tangible progress, largely due to lack of time, resources, and the inability to attend office hours because of another class. I have my code for CUDA and MPI included here, alongside the initial test cali files. I began to do the Jupityr Notebook code but was unable to finish it without testing on successful caliper files. I apologize for my lack of progress in this submission, and will try to catch up as well as I can before the next deadline, in between my multiple other projects. I will be attending Friday's office hours and could use assistance then.
+
 ## 5. Presentation
 
 ## 6. Final Report
