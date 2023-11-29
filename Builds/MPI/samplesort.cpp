@@ -18,7 +18,7 @@
 #define FROM_WORKER 2          /* setting a message type */
 
 // Cali Regions
-const char* whole_computation = "whole_computation";
+const char* main = "main";
 const char* data_init = "data_init";
 const char* comp = "comp";
 const char* comm = "comm";
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     numworkers = numTasks - 1;
     averow = arraySize/numworkers;
 
-    CALI_MARK_BEGIN(whole_computation);
+    CALI_MARK_BEGIN(main);
     
     // Create caliper ConfigManager object
     cali::ConfigManager mgr;
@@ -310,7 +310,7 @@ int main(int argc, char *argv[]) {
         CALI_MARK_END(comm);
     }
 
-    CALI_MARK_END(whole_computation);
+    CALI_MARK_END(main);
 
     adiak::init(NULL);
     adiak::launchdate();    // launch date of the job
