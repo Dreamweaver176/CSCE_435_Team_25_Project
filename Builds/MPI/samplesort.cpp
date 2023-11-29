@@ -18,7 +18,7 @@
 #define FROM_WORKER 2          /* setting a message type */
 
 // Cali Regions
-const char* main = "main";
+const char* whole_computation = "whole_computation";
 const char* data_init = "data_init";
 const char* comp = "comp";
 const char* comm = "comm";
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     numworkers = numTasks - 1;
     averow = arraySize/numworkers;
 
-    CALI_MARK_BEGIN(main);
+    CALI_MARK_BEGIN(whole_computation);
     
     // Create caliper ConfigManager object
     cali::ConfigManager mgr;
@@ -167,10 +167,10 @@ int main(int argc, char *argv[]) {
             int buckets[numworkers][averow+1];
             MPI_Recv(&buckets, numworkers*(averow+1), MPI_INT, source, mtype, MPI_COMM_WORLD, &status);
             for (int i=0; i<numworkers; i++) {
-            for (int j=0; j<averow+1; j++) {
-                if (buckets[i][j] != -1)
-                vecBuck[i].push_back(buckets[i][j]);
-            }
+                for (int j=0; j<averow+1; j++) {
+                    if (buckets[i][j] != -1)
+                    vecBuck[i].push_back(buckets[i][j]);
+                }
             }
         }
 
@@ -310,7 +310,7 @@ int main(int argc, char *argv[]) {
         CALI_MARK_END(comm);
     }
 
-    CALI_MARK_END(main);
+    CALI_MARK_END(whole_computation);
 
     adiak::init(NULL);
     adiak::launchdate();    // launch date of the job
