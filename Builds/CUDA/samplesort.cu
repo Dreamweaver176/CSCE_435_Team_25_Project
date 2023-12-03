@@ -8,6 +8,7 @@
 #include <caliper/cali.h>
 #include <caliper/cali-manager.h>
 #include <adiak.hpp>
+#include <thrust/sort.h>
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -33,12 +34,7 @@ void print_elapsed(clock_t start, clock_t stop)
   printf("Elapsed time: %.3fs\n", elapsed);
 };
 
-float random_float()
-{
-  return (float)rand()/(float)RAND_MAX;
-};
-
-void array_print(float *arr, int length) 
+void array_print(int *arr, int length) 
 {
   int i;
   for (i = 0; i < length; ++i) {
@@ -47,26 +43,42 @@ void array_print(float *arr, int length)
   printf("\n");
 };
 
-void array_fill(float *arr, int length)
+void array_fill(int *arr, int length)
 {
-  srand(time(NULL));
-  int i;
-  for (i = 0; i < length; ++i) {
-    arr[i] = random_float();
-  }
+    // for (int i = 0; i < length; ++i) {               // Sorted
+    //     arr[i] = static_cast<int>(i);
+    // }
+
+    srand(time(NULL));                               // Random
+    int i;
+    for (i = 0; i < length; ++i) {
+        arr[i] = static_cast<int>(rand() % length);
+    }
+
+    // for (int i = 0; i < length; ++i) {               // Reverse sorted
+    //     arr[i] = static_cast<int>(length - i);
+    // }
+
+    // srand(time(NULL));                             // 1%perturbed
+    // for(int i = 0; i < length; i++) {
+    //     arr[i] = static_cast<int>(i);
+    //     if (rand() % 100 == 1) {
+    //         arr[i] *= static_cast<int>(rand() % 10 + 0.5);
+    //     }
+    // }
 };
 
-__global__ void merge(float* values, int num_vals, float* temp) {
+__global__ void merge(int* values, int* temp, int NUM_VALS) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    int left = 2 * idx * num_vals / (2 * blockDim.x * gridDim.x);
-    int right = (2 * idx + 1) * num_vals / (2 * blockDim.x * gridDim.x);
-    int end = (2 * idx + 2) * num_vals / (2 * blockDim.x * gridDim.x);
+    int left = 2 * idx * NUM_VALS / (2 * blockDim.x * gridDim.x);
+    int right = (2 * idx + 1) * NUM_VALS / (2 * blockDim.x * gridDim.x);
+    int end = (2 * idx + 2) * NUM_VALS / (2 * blockDim.x * gridDim.x);
     
-    if (end > num_vals) end = num_vals;
+    if (end > NUM_VALS) end = NUM_VALS;
 
     int i = left;
     int j = right;
-    int k = left;
+    int k = 0;
 
     while (i < right && j < end) {
         if (values[i] <= values[j]) {
@@ -85,46 +97,72 @@ __global__ void merge(float* values, int num_vals, float* temp) {
     }
 
     // Copy the merged data back to the original array
-    for (int i = left; i < end; ++i) {
-        values[i] = temp[i];
+    for (int i = left, m = 0; i < end; ++i, ++m) {
+        values[i] = temp[m];
     }
 };
 
-void sample_sort(float* values, int num_vals, int num_threads, int num_blocks) {
+void sample_sort(int* values) {
     CALI_CXX_MARK_FUNCTION;
 
+    int block_size = THREADS;
+    int grid_size = BLOCKS;
+
+    int* d_values;
+
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_large);
+
+    cudaMalloc((void**)&d_values, NUM_VALS * sizeof(int));
+    cudaMemcpy(d_values, values, NUM_VALS * sizeof(int), cudaMemcpyHostToDevice);
+
+    CALI_MARK_END(comm_large);
+    CALI_MARK_END(comm);
+
+    dim3 blocks(BLOCKS,1);    /* Number of blocks   */
+    dim3 threads(THREADS,1);  /* Number of threads  */
+
+    int* d_temp;
+    cudaMalloc((void**)&d_temp, NUM_VALS * sizeof(int));
+
     CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_large);
 
-    int block_size = num_threads;
-    int grid_size = num_blocks;
-
-    float* d_values;
-    cudaMalloc((void**)&d_values, num_vals * sizeof(float));
-    cudaMemcpy(d_values, values, num_vals * sizeof(float), cudaMemcpyHostToDevice);
-
-    float* d_temp;
-    cudaMalloc((void**)&d_temp, num_vals * sizeof(float));
-
-    // Sort each block independently
+    // Sort each block independently using CUDA kernel
     for (int i = 0; i < grid_size; ++i) {
-        int offset = i * num_vals / grid_size;
-        std::sort(values + offset, values + offset + num_vals / grid_size);
+        int offset = i * NUM_VALS / grid_size;
+        int size = NUM_VALS / grid_size;
+        thrust::sort(thrust::device, d_values + offset, d_values + offset + size);
     }
 
-    // Merge sorted blocks
-    for (int size = num_vals / grid_size; size < num_vals; size *= 2) {
-        for (int i = 0; i < grid_size; i += 2) {
-            int offset = i * num_vals / grid_size;
-            merge<<<1, block_size>>>(d_values + offset, num_vals, d_temp);
-            cudaDeviceSynchronize();
-        }
-        cudaMemcpy(values, d_values, num_vals * sizeof(float), cudaMemcpyDeviceToHost);
+    CALI_MARK_END(comp_large);
+    CALI_MARK_END(comp);
+
+    CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_small);
+
+    // Merge sorted blocks iteratively until a fully sorted array is obtained
+    while (grid_size > 1) {
+        int new_grid_size = (grid_size + 1) / 2;
+        merge<<<new_grid_size, block_size>>>(d_values, d_temp, NUM_VALS);
+        cudaDeviceSynchronize();
+        grid_size = new_grid_size;
     }
+
+    CALI_MARK_END(comp_small);
+    CALI_MARK_END(comp);
+
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_small);
+
+    // Copy the sorted array back to the host
+    cudaMemcpy(values, d_values, NUM_VALS * sizeof(int), cudaMemcpyDeviceToHost);
+
+    CALI_MARK_END(comm_small);
+    CALI_MARK_END(comm);
 
     cudaFree(d_values);
     cudaFree(d_temp);
-
-    CALI_MARK_END(comp);
 };
 
 int main(int argc, char *argv[])
@@ -147,19 +185,20 @@ int main(int argc, char *argv[])
 
     CALI_MARK_BEGIN(data_init);
 
-    float *values = (float*) malloc( NUM_VALS * sizeof(float));
+    int *values = (int*) malloc( NUM_VALS * sizeof(int));
     array_fill(values, NUM_VALS);
 
     CALI_MARK_END(data_init);
 
-    sample_sort(values, NUM_VALS, THREADS, BLOCKS);
+    sample_sort(values);
 
     CALI_MARK_BEGIN(correctness_check);
 
     bool sorted = true;
     for (int i = 1; i < NUM_VALS; i++) {
+      //printf("a[i]: %d\n", values[i]);
         if (values[i] < values[i-1]) {
-            printf("Error. Out of order sequence: %f found\n", values[i]);
+            printf("Error. Out of order sequence: %d found\n", values[i]);
             sorted = false;
         }
     }
@@ -177,8 +216,8 @@ int main(int argc, char *argv[])
     adiak::clustername();   // Name of the cluster
     adiak::value("Algorithm", "SampleSort"); // The name of the algorithm you are using (e.g., "MergeSort", "BitonicSort")
     adiak::value("ProgrammingModel", "CUDA"); // e.g., "MPI", "CUDA", "MPIwithCUDA"
-    adiak::value("Datatype", "Float"); // The datatype of input elements (e.g., double, int, float)
-    adiak::value("SizeOfDatatype", sizeof(float)); // sizeof(datatype) of input elements in bytes (e.g., 1, 2, 4)
+    adiak::value("Datatype", "Integer"); // The datatype of input elements (e.g., double, int, float)
+    adiak::value("SizeOfDatatype", sizeof(int)); // sizeof(datatype) of input elements in bytes (e.g., 1, 2, 4)
     adiak::value("InputSize", NUM_VALS); // The number of elements in input dataset (1000)
     adiak::value("InputType", "Random"); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
     //adiak::value("num_procs", numtasks); // The number of processors (MPI ranks)
@@ -190,4 +229,6 @@ int main(int argc, char *argv[])
     // Flush Caliper output before finalizing MPI
     mgr.stop();
     mgr.flush();
+
+    //free(values);
 };
