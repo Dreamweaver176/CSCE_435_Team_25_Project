@@ -49,105 +49,80 @@ void array_fill(int *arr, int length)
     //     arr[i] = static_cast<int>(i);
     // }
 
-    srand(time(NULL));                               // Random
-    int i;
-    for (i = 0; i < length; ++i) {
-        arr[i] = static_cast<int>(rand() % length);
-    }
+    // srand(time(NULL));                               // Random
+    // int i;
+    // for (i = 0; i < length; ++i) {
+    //     arr[i] = static_cast<int>(rand() % length);
+    // }
 
     // for (int i = 0; i < length; ++i) {               // Reverse sorted
     //     arr[i] = static_cast<int>(length - i);
     // }
 
-    // srand(time(NULL));                             // 1%perturbed
-    // for(int i = 0; i < length; i++) {
-    //     arr[i] = static_cast<int>(i);
-    //     if (rand() % 100 == 1) {
-    //         arr[i] *= static_cast<int>(rand() % 10 + 0.5);
-    //     }
-    // }
-};
-
-__global__ void merge(int* values, int* temp, int NUM_VALS) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    int left = 2 * idx * NUM_VALS / (2 * blockDim.x * gridDim.x);
-    int right = (2 * idx + 1) * NUM_VALS / (2 * blockDim.x * gridDim.x);
-    int end = (2 * idx + 2) * NUM_VALS / (2 * blockDim.x * gridDim.x);
-    
-    if (end > NUM_VALS) end = NUM_VALS;
-
-    int i = left;
-    int j = right;
-    int k = 0;
-
-    while (i < right && j < end) {
-        if (values[i] <= values[j]) {
-            temp[k++] = values[i++];
-        } else {
-            temp[k++] = values[j++];
+    srand(time(NULL));                             // 1%perturbed
+    for(int i = 0; i < length; i++) {
+        arr[i] = static_cast<int>(i);
+        if (rand() % 100 == 1) {
+            arr[i] *= static_cast<int>(rand() % 10 + 0.5);
         }
     }
-
-    while (i < right) {
-        temp[k++] = values[i++];
-    }
-
-    while (j < end) {
-        temp[k++] = values[j++];
-    }
-
-    // Copy the merged data back to the original array
-    for (int i = left, m = 0; i < end; ++i, ++m) {
-        values[i] = temp[m];
-    }
 };
 
-void sample_sort(int* values) {
-    CALI_CXX_MARK_FUNCTION;
+const int RADIX_BITS = 8; // Number of bits to consider in each pass
 
-    int block_size = THREADS;
-    int grid_size = BLOCKS;
+__device__ int get_radix(int value, int bit) {
+    return (value >> bit) & ((1 << RADIX_BITS) - 1);
+}
 
-    int* d_values;
+__global__ void counting_sort(int* values, int* temp, int bit, int size, int num_blocks) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    CALI_MARK_BEGIN(comm);
-    CALI_MARK_BEGIN(comm_large);
+    // Initialize counters
+    int counters[1 << RADIX_BITS] = {0};
 
-    cudaMalloc((void**)&d_values, NUM_VALS * sizeof(int));
-    cudaMemcpy(d_values, values, NUM_VALS * sizeof(int), cudaMemcpyHostToDevice);
-
-    CALI_MARK_END(comm_large);
-    CALI_MARK_END(comm);
-
-    dim3 blocks(BLOCKS,1);    /* Number of blocks   */
-    dim3 threads(THREADS,1);  /* Number of threads  */
-
-    int* d_temp;
-    cudaMalloc((void**)&d_temp, NUM_VALS * sizeof(int));
-
-    CALI_MARK_BEGIN(comp);
-    CALI_MARK_BEGIN(comp_large);
-
-    // Sort each block independently using CUDA kernel
-    for (int i = 0; i < grid_size; ++i) {
-        int offset = i * NUM_VALS / grid_size;
-        int size = NUM_VALS / grid_size;
-        thrust::sort(thrust::device, d_values + offset, d_values + offset + size);
+    // Count occurrences of each radix
+    for (int i = tid; i < size; i += blockDim.x * num_blocks) {
+        int radix = get_radix(values[i], bit);
+        atomicAdd(&counters[radix], 1);
     }
 
-    CALI_MARK_END(comp_large);
-    CALI_MARK_END(comp);
+    __syncthreads();
 
-    CALI_MARK_BEGIN(comp);
+    // Prefix sum to determine the starting index for each radix
+    for (int i = 1; i < (1 << RADIX_BITS); ++i) {
+        counters[i] += counters[i - 1];
+    }
+
+    __syncthreads();
+
+    // Move values to their sorted positions in temp array
+    for (int i = size - 1; i >= 0; --i) {
+        int radix = get_radix(values[i], bit);
+        int index = counters[radix] - 1;
+        temp[index] = values[i];
+        atomicSub(&counters[radix], 1);
+    }
+
+    __syncthreads();
+
+    // Copy values back to the original array
+    for (int i = tid; i < size; i += blockDim.x * num_blocks) {
+        values[i] = temp[i];
+    }
+}
+
+void sample_sort(int* values) {
+  CALI_CXX_MARK_FUNCTION;
+
+  CALI_MARK_BEGIN(comp);
     CALI_MARK_BEGIN(comp_small);
 
-    // Merge sorted blocks iteratively until a fully sorted array is obtained
-    while (grid_size > 1) {
-        int new_grid_size = (grid_size + 1) / 2;
-        merge<<<new_grid_size, block_size>>>(d_values, d_temp, NUM_VALS);
-        cudaDeviceSynchronize();
-        grid_size = new_grid_size;
-    }
+    int* dev_values;
+    int* dev_temp;
+    const int size = NUM_VALS;
+
+    cudaMalloc((void**)&dev_values, size * sizeof(int));
+    cudaMalloc((void**)&dev_temp, size * sizeof(int));
 
     CALI_MARK_END(comp_small);
     CALI_MARK_END(comp);
@@ -155,15 +130,33 @@ void sample_sort(int* values) {
     CALI_MARK_BEGIN(comm);
     CALI_MARK_BEGIN(comm_small);
 
-    // Copy the sorted array back to the host
-    cudaMemcpy(values, d_values, NUM_VALS * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(dev_values, values, size * sizeof(int), cudaMemcpyHostToDevice);
 
     CALI_MARK_END(comm_small);
     CALI_MARK_END(comm);
 
-    cudaFree(d_values);
-    cudaFree(d_temp);
-};
+    CALI_MARK_BEGIN(comp);
+    CALI_MARK_BEGIN(comp_large);
+
+    // Iterate through each radix
+    for (int bit = 0; bit < sizeof(int) * 8; bit += RADIX_BITS) {
+        counting_sort<<<BLOCKS, THREADS>>>(dev_values, dev_temp, bit, size, BLOCKS);
+    }
+
+    CALI_MARK_END(comp_large);
+    CALI_MARK_END(comp);
+
+    CALI_MARK_BEGIN(comm);
+    CALI_MARK_BEGIN(comm_large);
+
+    cudaMemcpy(values, dev_values, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+    CALI_MARK_END(comm_large);
+    CALI_MARK_END(comm);
+
+    cudaFree(dev_values);
+    cudaFree(dev_temp);
+}
 
 int main(int argc, char *argv[])
 {
@@ -198,7 +191,7 @@ int main(int argc, char *argv[])
     for (int i = 1; i < NUM_VALS; i++) {
       //printf("a[i]: %d\n", values[i]);
         if (values[i] < values[i-1]) {
-            printf("Error. Out of order sequence: %d found\n", values[i]);
+            //printf("Error. Out of order sequence: %d found\n", values[i]);
             sorted = false;
         }
     }
@@ -219,7 +212,7 @@ int main(int argc, char *argv[])
     adiak::value("Datatype", "Integer"); // The datatype of input elements (e.g., double, int, float)
     adiak::value("SizeOfDatatype", sizeof(int)); // sizeof(datatype) of input elements in bytes (e.g., 1, 2, 4)
     adiak::value("InputSize", NUM_VALS); // The number of elements in input dataset (1000)
-    adiak::value("InputType", "Random"); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
+    adiak::value("InputType", "1%Perturbed"); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
     //adiak::value("num_procs", numtasks); // The number of processors (MPI ranks)
     adiak::value("num_threads", THREADS); // The number of CUDA or OpenMP threads
     adiak::value("num_blocks", BLOCKS); // The number of CUDA blocks 
