@@ -1,224 +1,186 @@
 #include "mpi.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <cstring>
+#include <string.h>
 
 #include <caliper/cali.h>
 #include <caliper/cali-manager.h>
 #include <adiak.hpp>
 
-int OPTION;
-int NUM_VALS;
+int total_elements;
+int fill_option;
 
-const char* options[4] = {"random", "sorted", "reverse_sorted", "1%perturbed"};
+const char* fill_methods[4] = {"random", "sorted", "reverse_sorted", "1% perturbed"};
 
-float random_float() {
-  return (float)rand()/(float)RAND_MAX;
+float generate_random_float() {
+    return (float)rand() / (float)RAND_MAX;
 }
 
-void array_fill(float *array, int length, int offset, int choice) {
-    if (choice == 1) {
-        srand(offset);
-        for (int i = 0; i < length; ++i) {
-            array[i] = random_float();
+void populate_array(float *array, int size, int seed, int method) {
+    srand(seed);
+    int i;
+    if (method == 1) { // Random
+        for (i = 0; i < size; ++i) {
+            array[i] = generate_random_float();
         }
-    } 
-    else if (choice == 2) {
-        for (int i = 0; i < length; ++i) {
-            array[i] = (float)offset+i;
+    } else if (method == 2) { // Sorted
+        for (i = 0; i < size; ++i) {
+            array[i] = (float)seed + i;
         }
-    } 
-    else if (choice == 3) {
-        for (int i = 0; i < length; ++i) {
-            array[i] = (float)offset+length-1-i;
+    } else if (method == 3) { // Reverse Sorted
+        for (i = 0; i < size; ++i) {
+            array[i] = (float)seed + size - 1 - i;
         }
-    } 
-    else if (choice == 4) {
-        for (int i = 0; i < length; ++i) {
+    } else if (method == 4) { // 1% Perturbed
+        for (i = 0; i < size; ++i) {
             array[i] = (float)i;
         }
-
-        int p_count = length / 100;
-        srand(offset);
-        for (int i = 0; i < p_count; ++i) {
-            int index = rand() % length;
-            array[index] = random_float();
+        int perturbations = size / 100;
+        for (i = 0; i < perturbations; ++i) {
+            int idx = rand() % size;
+            array[idx] = generate_random_float();
         }
     }
 }
 
-int Compare(const void* a, const void* b) {
-    return ( *(int*)a - *(int*)b );
+int float_compare(const void *a, const void *b) {
+    return (*(float*)a - *(float*)b);
 }
 
-void merge_low(float *values, float *A, float *B, int vals_numbers) {
-   int a = 0;
-   int b = 0;
-   int c = 0;
+void merge_arrays(float *source, float *temp1, float *temp2, int array_size, int is_high) {
+    int x = 0, y = 0, z = 0, i;
 
-   while (c < vals_numbers) {
-      if (values[a] <= A[b]) {
-         B[c] = values[a];
-         c++; a++;
-      } 
-      else {
-         B[c] = A[b];
-         c++; b++;
-      }
-   }
-
-   memcpy(values, B, vals_numbers*sizeof(float));
-}
-
-void merge_high(float *array_values, float *A, float *B, int vals_numbers) {
-   int a = vals_numbers - 1;
-   int b = vals_numbers - 1;
-   int c = vals_numbers - 1;
-
-   while (c >= 0) {
-      if (array_values[a] >= A[b]) {
-         B[c] = array_values[a];
-         c--; a--;
-      } 
-      else {
-         B[c] = A[b];
-         c--; b--;
-      }
-   }
-
-   memcpy(array_values, B, vals_numbers*sizeof(float));
-}
-
-void odd_even_iter(float *array_values, float *A, float *B, int vals_numbers, int phase, int temp_even, int temp_odd, int rank, int num_threads, MPI_Comm comm) {
-   
-   MPI_Status status;
-
-    if (phase % 2 != 0) {
-      if (temp_odd >= 0) {
-         MPI_Sendrecv(array_values, vals_numbers, MPI_FLOAT, temp_odd, 0, A, vals_numbers, MPI_FLOAT, temp_odd, 0, comm, &status);
-         if (rank % 2 != 0){
-            merge_low(array_values, A, B, vals_numbers);
-         }
-         else{
-            merge_high(array_values, A, B, vals_numbers);
-         }
-      }
-   }
-
-   else {
-      if (temp_even >= 0) {
-         MPI_Sendrecv(array_values, vals_numbers, MPI_FLOAT, temp_even, 0, A, vals_numbers, MPI_FLOAT, temp_even, 0, comm, &status);
-         if (rank % 2 != 0){
-            merge_high(array_values, A, B, vals_numbers);
-         }
-         else{
-            merge_low(array_values, A, B, vals_numbers);
-         }
-      }
-   } 
-}
-
-void odd_even_sort(float *array_values, int vals_numbers, int rank, int num_threads, MPI_Comm comm) {
-    int temp_even;
-    int temp_odd;
-
-    float *A = (float*) malloc(vals_numbers*sizeof(float));
-    float *B = (float*) malloc(vals_numbers*sizeof(float));
-
-    if (rank % 2 != 0) {
-        temp_even = rank - 1;
-        temp_odd = rank + 1;
-        if (temp_odd == num_threads) temp_odd = MPI_PROC_NULL;
+    if (is_high) {
+        for (i = array_size - 1; i >= 0; --i) {
+            if (source[i] >= temp1[i]) {
+                temp2[z++] = source[i--];
+            } else {
+                temp2[z++] = temp1[i--];
+            }
+        }
     } else {
-        temp_even = rank + 1;
-        if (temp_even == num_threads) temp_even = MPI_PROC_NULL;
-        temp_odd = rank-1;
-    }
-
-    qsort(array_values, vals_numbers, sizeof(int), Compare);
-
-    for (int phase = 0; phase < num_threads; phase++) {
-        odd_even_iter(array_values, A, B, vals_numbers, phase, temp_even, temp_odd, rank, num_threads, comm);
-    }
-    
-    free(A);
-    free(B);
-}
-
-void assign(float* array_values, float* array, int offset, int rank) {
-    for (int i = 0; i < offset; ++i) {
-        array_values[i+offset*rank] = array[i];
-    }
-}
-
-int check(float* array_values, int length) {
-    for (int i = 1; i < length; ++i) {
-        if (array_values[i] < array_values[i -1]) {
-            return 0;
+        for (i = 0; i < array_size; ++i) {
+            if (source[x] <= temp1[y]) {
+                temp2[z++] = source[x++];
+            } else {
+                temp2[z++] = temp1[y++];
+            }
         }
+    }
+
+    memcpy(source, temp2, array_size * sizeof(float));
+}
+
+void sorting_iteration(float *data, float *temp1, float *temp2, int array_size, int phase, int even_partner, int odd_partner, int process_rank, int num_processes, MPI_Comm comm) {
+    MPI_Status status;
+
+    if (phase % 2 == 0) { // Even phase
+        if (even_partner != MPI_PROC_NULL) {
+            MPI_Sendrecv(data, array_size, MPI_FLOAT, even_partner, 0, temp1, array_size, MPI_FLOAT, even_partner, 0, comm, &status);
+            merge_arrays(data, temp1, temp2, array_size, process_rank % 2);
+        }
+    } else { // Odd phase
+        if (odd_partner != MPI_PROC_NULL) {
+            MPI_Sendrecv(data, array_size, MPI_FLOAT, odd_partner, 0, temp1, array_size, MPI_FLOAT, odd_partner, 0, comm, &status);
+            merge_arrays(data, temp1, temp2, array_size, !(process_rank % 2));
+        }
+    }
+}
+
+void odd_even_sort(float *data, int array_size, int process_rank, int num_processes, MPI_Comm comm) {
+    int even_partner, odd_partner;
+    float *temp1 = (float*)malloc(array_size * sizeof(float));
+    float *temp2 = (float*)malloc(array_size * sizeof(float));
+
+    even_partner = (process_rank % 2 == 0) ? process_rank + 1 : process_rank - 1;
+    odd_partner = (process_rank % 2 == 0) ? process_rank - 1 : process_rank + 1;
+
+    if (even_partner == num_processes || even_partner < 0) even_partner = MPI_PROC_NULL;
+    if (odd_partner < 0) odd_partner = MPI_PROC_NULL;
+
+    qsort(data, array_size, sizeof(float), float_compare);
+
+    int phase;
+    for (phase = 0; phase < num_processes; ++phase) {
+        sorting_iteration(data, temp1, temp2, array_size, phase, even_partner, odd_partner, process_rank, num_processes, comm);
+    }
+
+    free(temp1);
+    free(temp2);
+}
+
+void distribute_data(float *global_data, float *local_data, int segment_size, int rank) {
+    for (int i = 0; i < segment_size; ++i) {
+        global_data[i + segment_size * rank] = local_data[i];
+    }
+}
+
+int verify_sorted(float *data, int size) {
+    for (int i = 1; i < size; ++i) {
+        if (data[i] < data[i - 1]) return 0;
     }
     return 1;
 }
 
-int main (int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     CALI_CXX_MARK_FUNCTION;
 
-    int	numtasks, taskid;
-    
-    NUM_VALS = atoi(argv[1]);
-    OPTION = atoi(argv[2]);
+    int num_processes, process_rank;
+    total_elements = atoi(argv[1]);
+    fill_option = atoi(argv[2]);
 
-    MPI_Status status;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &process_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
 
-    MPI_Init(&argc,&argv);
-    MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
-    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
+    cali::ConfigManager cali_manager;
+    cali_manager.start();
 
-    cali::ConfigManager mgr;
-    mgr.start(); 
+    int segment_size = total_elements / num_processes;
+    float *local_data = (float*)malloc(segment_size * sizeof(float));
 
-    int offset = NUM_VALS / numtasks;
-
-    float *values = (float*) malloc(offset * sizeof(float));
-
+    // Data initialization
     CALI_MARK_BEGIN("data_init");
-    array_fill(values, offset, offset*taskid, OPTION);
+    populate_array(local_data, segment_size, segment_size * process_rank, fill_option);
     CALI_MARK_END("data_init");
 
+    // Sorting computation
     CALI_MARK_BEGIN("comp");
     CALI_MARK_BEGIN("comp_large");
-    odd_even_sort(values, offset, taskid, numtasks, MPI_COMM_WORLD);
+    odd_even_sort(local_data, segment_size, process_rank, num_processes, MPI_COMM_WORLD);
     CALI_MARK_END("comp_large");
     CALI_MARK_END("comp");
 
-    float* global_list;
+    float *collected_data;
+    MPI_Status status;
 
+    // Data communication
     CALI_MARK_BEGIN("comm");
     CALI_MARK_BEGIN("comm_large");
-    if (taskid == 0) {
-        global_list = (float*) malloc( NUM_VALS * sizeof(float));
-        assign(global_list, values, offset, 0);
-        float *temp = (float*) malloc(offset * sizeof(float));
-        for (int rank = 1; rank < numtasks; rank++) {
-            CALI_MARK_BEGIN("MPI_Recv");
-            MPI_Recv(temp, offset, MPI_FLOAT, rank, 0, MPI_COMM_WORLD, &status);
-            CALI_MARK_END("MPI_Recv");
-            assign(global_list, temp, offset, rank);
-        }
-        free(temp);
+    if (process_rank == 0) {
+        collected_data = (float*)malloc(total_elements * sizeof(float));
+        distribute_data(collected_data, local_data, segment_size, 0);
 
-    } 
-    else {
+        float *temp_data = (float*)malloc(segment_size * sizeof(float));
+        for (int i = 1; i < num_processes; ++i) {
+            CALI_MARK_BEGIN("MPI_Recv");
+            MPI_Recv(temp_data, segment_size, MPI_FLOAT, i, 0, MPI_COMM_WORLD, &status);
+            CALI_MARK_END("MPI_Recv");
+            distribute_data(collected_data, temp_data, segment_size, i);
+        }
+        free(temp_data);
+    } else {
         CALI_MARK_BEGIN("MPI_Send");
-        MPI_Send(values, offset, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(local_data, segment_size, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
         CALI_MARK_END("MPI_Send");
     }
     CALI_MARK_END("comm_large");
     CALI_MARK_END("comm");
 
-    if (taskid == 0) {
+    // Verification and logging
+    if (process_rank == 0) {
         CALI_MARK_BEGIN("correctness_check");
-        int correctness = check(global_list, NUM_VALS);
+        int is_sorted_correctly = verify_sorted(collected_data, total_elements);
         CALI_MARK_END("correctness_check");
 
         adiak::init(NULL);
@@ -238,9 +200,8 @@ int main (int argc, char *argv[]) {
         adiak::value("correctness", correctness); // Whether the dataset has been sorted (0, 1)
     }
 
-    // Flush Caliper output before finalizing MPI
-    mgr.stop();
-    mgr.flush();
-
+    // Finalize
+    cali_manager.stop();
+    cali_manager.flush();
     MPI_Finalize();
 }
