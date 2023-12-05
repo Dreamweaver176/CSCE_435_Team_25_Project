@@ -1,147 +1,156 @@
-#include <caliper/cali.h>
-#include <caliper/cali-manager.h>
-#include <adiak.hpp>
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-
+#include <caliper/cali.h>
+#include <caliper/cali-manager.h>
+#include <adiak.hpp>
 #include <cuda_runtime.h>
 #include <cuda.h>
 
-//Defining variable inputs for sbatch jobfile
-int BLOCKS;
-int NUM_VALS;
-int THREADS;
-int OPTION;
+// Define constants
+#define MAX_THREADS 1024
+#define MAX_BLOCKS 1024
 
-const char* options[4] = {"random", "sorted", "reverse_sorted", "1%perturbed"};
+int numThreads;
+int numBlocks;
+int totalValues;
+int inputOption;
 
-float random_float() {
-  return (float)rand()/(float)RAND_MAX;
+const char* inputTypes[4] = {"random", "sorted", "reverse_sorted", "1% perturbed"};
+
+// Function to generate random float
+float generateRandomFloat() {
+  return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 }
 
-void array_fill(float *array, int length, int choice) {
-    if (choice == 1) {
-        srand(0);
-        for (int i = 0; i < length; ++i) {
-            array[i] = random_float();
-        }
-    } 
-    else if (choice == 2) {
-        for (int i = 0; i < length; ++i) {
-            array[i] = (float)i;
-        }
-    } 
-    else if (choice == 3) {
-        for (int i = 0; i < length; ++i) {
-            array[i] = (float)length-1-i;
-        }
-    } 
-    else if (choice == 4) {
-        for (int i = 0; i < length; ++i) {
-            array[i] = (float)i;
-        }
+// Function to fill the array
+void fillArray(float *array, int size, int option) {
+    srand(0);
+    int perturb_count = size / 100;
 
-        int p_count = length / 100;
-        srand(0);
-        for (int i = 0; i < p_count; ++i) {
-            int index = rand() % length;
-            array[index] = random_float();
+    for (int i = 0; i < size; ++i) {
+        switch (option) {
+            case 1:
+                array[i] = generateRandomFloat();
+                break;
+            case 2:
+                array[i] = static_cast<float>(i);
+                break;
+            case 3:
+                array[i] = static_cast<float>(size - i - 1);
+                break;
+            case 4:
+                array[i] = static_cast<float>(i);
+                if (i < perturb_count) {
+                    int index = rand() % size;
+                    array[index] = generateRandomFloat();
+                }
+                break;
         }
     }
 }
 
-int check(float* arr_values, int length) {
-    for (int i = 1; i < length; ++i) {
-        if (arr_values[i] < arr_values[i -1]) {
-            return 0;
+// Function to check if the array is sorted
+int isSorted(float* array, int size) {
+    for (int i = 1; i < size; ++i) {
+        if (array[i] < array[i - 1]) {
+            return 0; // Not sorted
         }
     }
-    return 1;
+    return 1; // Sorted
 }
 
-__global__ void even_sort(float *arr_values, int num_vals) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (i%2 == 0 && i < num_vals-1 ) {
-        if (arr_values[i] > arr_values[i+1]) {
-                float temp = arr_values[i];
-                arr_values[i] = arr_values[i + 1];
-                arr_values[i + 1] = temp;
-        }                   
+// CUDA kernel for even sort
+__global__ void sortEven(float *array, int size) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index % 2 == 0 && index < size - 1) {
+        if (array[index] > array[index + 1]) {
+            float temp = array[index];
+            array[index] = array[index + 1];
+            array[index + 1] = temp;
+        }
     }
-    __syncthreads();
 }
 
-__global__ void odd_sort(float *arr_values, int num_vals) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (i%2 == 1 && i < num_vals-1 ) {
-        if (arr_values[i] > arr_values[i+1]) {
-                float temp = arr_values[i];
-                arr_values[i] = arr_values[i + 1];
-                arr_values[i + 1] = temp;
-        }                   
+// CUDA kernel for odd sort
+__global__ void sortOdd(float *array, int size) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index % 2 == 1 && index < size - 1) {
+        if (array[index] > array[index + 1]) {
+            float temp = array[index];
+            array[index] = array[index + 1];
+            array[index + 1] = temp;
+        }
     }
-    __syncthreads();
 }
 
 int main(int argc, char *argv[]) {
     CALI_CXX_MARK_FUNCTION;
 
-    THREADS = atoi(argv[1]);
-    NUM_VALS = atoi(argv[2]);
-    OPTION = atoi(argv[3]);
-    BLOCKS = NUM_VALS / THREADS;
+    // Parsing command line arguments
+    numThreads = atoi(argv[1]);
+    totalValues = atoi(argv[2]);
+    inputOption = atoi(argv[3]);
+    numBlocks = totalValues / numThreads;
 
-    size_t size = NUM_VALS * sizeof(float);
-    cali::ConfigManager mgr;
-    mgr.start();
+    size_t arraySize = totalValues * sizeof(float);
 
-    float *values = (float*) malloc( NUM_VALS * sizeof(float));
+    // Caliper ConfigManager setup
+    cali::ConfigManager configManager;
+    configManager.start();
+
+    // Host array allocation and initialization
+    float *hostArray = static_cast<float*>(malloc(arraySize));
     CALI_MARK_BEGIN("data_init");
-    array_fill(values, NUM_VALS, OPTION);
+    fillArray(hostArray, totalValues, inputOption);
     CALI_MARK_END("data_init");
 
-    float *dev_values;
-    cudaMalloc((void**) &dev_values, size);
+    // Device array allocation
+    float *deviceArray;
+    cudaMalloc(&deviceArray, arraySize);
 
+    // Copy data from host to device
     CALI_MARK_BEGIN("comm");
     CALI_MARK_BEGIN("comm_large");
     CALI_MARK_BEGIN("cudaMemcpy");
-    cudaMemcpy(dev_values, values, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceArray, hostArray, arraySize, cudaMemcpyHostToDevice);
     CALI_MARK_END("cudaMemcpy");
     CALI_MARK_END("comm_large");
     CALI_MARK_END("comm");
 
-    dim3 threadsPerBlock(THREADS);
-    dim3 numBlocks(BLOCKS);
 
+    dim3 threadsPerBlock(numThreads);
+    dim3 blocksPerGrid(numBlocks);
+
+    // Sorting
     CALI_MARK_BEGIN("comp");
     CALI_MARK_BEGIN("comp_large");
-    for (int i = 0; i < NUM_VALS/2; ++i) {
-        even_sort<<<BLOCKS, THREADS>>>(dev_values, NUM_VALS);
-        odd_sort<<<BLOCKS, THREADS>>>(dev_values, NUM_VALS);
+    for (int i = 0; i < totalValues / 2; ++i) {
+        sortEven<<<blocksPerGrid, threadsPerBlock>>>(deviceArray, totalValues);
+        sortOdd<<<blocksPerGrid, threadsPerBlock>>>(deviceArray, totalValues);
     }
     cudaDeviceSynchronize();
     CALI_MARK_END("comp_large");
     CALI_MARK_END("comp");
 
+// Copy data back from device to host
     CALI_MARK_BEGIN("comm");
     CALI_MARK_BEGIN("comm_large");
     CALI_MARK_BEGIN("cudaMemcpy");
-    cudaMemcpy(values, dev_values, size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(hostArray, deviceArray, arraySize, cudaMemcpyDeviceToHost);
     CALI_MARK_END("cudaMemcpy");
     CALI_MARK_END("comm_large");
     CALI_MARK_END("comm");
-    
+
+    // Check if array is sorted
     CALI_MARK_BEGIN("correctness_check");
-    int correctness = check(values, NUM_VALS);
+    int isSortedArray = isSorted(hostArray, totalValues);
     CALI_MARK_END("correctness_check");
 
-    cudaFree(dev_values);
+    // Free device memory
+    cudaFree(deviceArray);
 
+    // Adiak value setup
     adiak::init(NULL);
     adiak::launchdate();    // launch date of the job
     adiak::libraries();     // Libraries used
@@ -159,7 +168,10 @@ int main(int argc, char *argv[]) {
     adiak::value("implementation_source", "Online and Handwritten"); // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
     adiak::value("correctness", correctness); // Whether the dataset has been sorted (0, 1)
 
-    // Flush Caliper output
-    mgr.stop();
-    mgr.flush();
+    // Caliper output
+    configManager.stop();
+    configManager.flush();
+
+    free(hostArray);
+    return 0;
 }
