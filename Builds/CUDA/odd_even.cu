@@ -164,7 +164,7 @@ int main(int argc, char *argv[]) {
     adiak::value("InputType", options[OPTION-1]); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
     adiak::value("num_threads", THREADS); // The number of CUDA or OpenMP threads
     adiak::value("num_blocks", BLOCKS); // The number of CUDA blocks 
-    adiak::value("group_num", 5); // The number of your group (integer, e.g., 1, 10)
+    adiak::value("group_num", 25); // The number of your group (integer, e.g., 1, 10)
     adiak::value("implementation_source", "Online and Handwritten"); // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
     adiak::value("correctness", correctness); // Whether the dataset has been sorted (0, 1)
 
