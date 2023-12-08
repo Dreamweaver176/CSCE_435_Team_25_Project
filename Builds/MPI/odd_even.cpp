@@ -195,7 +195,7 @@ int main(int argc, char *argv[]) {
         adiak::value("InputSize", NUM_VALS); // The number of elements in input dataset (1000)
         adiak::value("InputType", options[OPTION-1]); // For sorting, this would be "Sorted", "ReverseSorted", "Random", "1%perturbed"
         adiak::value("num_procs", numtasks); // The number of processors (MPI ranks)
-        adiak::value("group_num", 5); // The number of your group (integer, e.g., 1, 10)
+        adiak::value("group_num", 25); // The number of your group (integer, e.g., 1, 10)
         adiak::value("implementation_source", "Online and Handwritten"); // Where you got the source code of your algorithm; choices: ("Online", "AI", "Handwritten").
         adiak::value("correctness", correctness); // Whether the dataset has been sorted (0, 1)
     }
