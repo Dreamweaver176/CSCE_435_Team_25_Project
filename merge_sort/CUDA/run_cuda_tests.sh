@@ -1,33 +1,21 @@
 #!/bin/bash
 
-for i in {2 4 8 16 32 64 128}
+for j in {65536 262144 1048576 4194304 16777216 67108864 268435456}
 do
-    for j in {128 256 512 1024 4096}
-    do
-        sbatch mergesort.grace_job $j $i s
-    done
+    sbatch mergesort.grace_job $j 64 s
 done
 
-for i in {2 4 8 16 32 64 128}
+for j in {65536 262144 1048576 4194304 16777216 67108864 268435456}
 do
-    for j in {128 256 512 1024 4096}
-    do
-        sbatch mergesort.grace_job $j $i r
-    done
+    sbatch mergesort.grace_job $j 64 r
 done
 
-for i in {2 4 8 16 32 64 128}
+for j in {65536 262144 1048576 4194304 16777216 67108864 268435456}
 do
-    for j in {128 256 512 1024 4096}
-    do
-        sbatch mergesort.grace_job $j $i p
-    done
+    sbatch mergesort.grace_job $j 64 p
 done
 
-for i in {2 4 8 16 32 64 128}
+for j in {65536 262144 1048576 4194304 16777216 67108864 268435456}
 do
-    for j in {128 256 512 1024 4096}
-    do
-        sbatch mergesort.grace_job $j $i a
-    done
+    sbatch mergesort.grace_job $j 64 a
 done
